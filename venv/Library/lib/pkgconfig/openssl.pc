@@ -1,0 +1,9 @@
+prefix=C:/Users/MSI/OneDrive/Desktop/CSE495B_NLP_Project/Ai_Agent/venv/Library 
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: OpenSSL
+Description: Secure Sockets Layer and cryptography libraries and tools
+Requires: libssl libcrypto
+Version: 3.0.19 
