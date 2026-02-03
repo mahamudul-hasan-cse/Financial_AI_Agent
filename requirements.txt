@@ -6,4 +6,4 @@ duckduckgo-search
 fastapi
 uvicorn
 groq
-openai
+openai(optional/not require)
