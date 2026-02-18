@@ -205,3 +205,11 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Frontend build output and dependencies
+frontend/dist/
+frontend/node_modules/
+
+# Claude Code
+.claude/
+CLAUDE.md

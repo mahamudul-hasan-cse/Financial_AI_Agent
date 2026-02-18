@@ -1,9 +1,8 @@
-phidata
+agno==1.8.4
 python-dotenv
-yfinance 
+yfinance
 packaging
 duckduckgo-search
 fastapi
 uvicorn
 groq
-openai(optional/not require)
