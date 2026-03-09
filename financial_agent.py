@@ -1,32 +1,51 @@
-import os
-from dotenv import load_dotenv
-load_dotenv(override=True)
+"""Backward-compatible shim — delegates to ``backend.app.agent``.
 
-from agno.agent import Agent
-from agno.models.groq import Groq
-from agno.tools.yfinance import YFinanceTools
-from agno.tools.duckduckgo import DuckDuckGoTools
+Every public name that previously lived here is re-exported so that
+existing consumers (``api.py``, tests, CLI) continue to work with
+**zero import changes**.
 
-groq_api_key = os.getenv("GROQ_API_KEY")
+Canonical location: ``backend/app/agent/``
+"""
 
-agent = Agent(
-    model=Groq(id="meta-llama/llama-4-scout-17b-16e-instruct", api_key=groq_api_key),
-    tools=[
-        DuckDuckGoTools(),
-        YFinanceTools(
-            stock_price=True,
-            analyst_recommendations=True,
-            stock_fundamentals=True,
-            company_news=True,
-        ),
-    ],
-    instructions=["Always include sources", "Use tables to display the data"],
-    show_tool_calls=False,
-    markdown=True,
+from __future__ import annotations
+
+# ── Re-exports from the new package ──────────────────────────────────
+from backend.app.agent.prompts import (              # noqa: F401
+    TOOL_CATALOGUE,
+    BEHAVIOURAL_RULES,
+    AGENT_INSTRUCTIONS,
+)
+from backend.app.agent.tool_registry import (        # noqa: F401
+    build_tools as _build_tools,
+    build_tools,
+    TOOL_FACTORIES,
+)
+from backend.app.agent.financial_agent import (      # noqa: F401
+    FinancialAgentService,
+    agent_service,
+    agent,
+    create_agent,
+    main,
+    DEFAULT_MODEL_ID,
+    _interactive_loop,
 )
 
+__all__ = [
+    "FinancialAgentService",
+    "agent_service",
+    "agent",
+    "create_agent",
+    "main",
+    "AGENT_INSTRUCTIONS",
+    "TOOL_CATALOGUE",
+    "BEHAVIOURAL_RULES",
+    "_build_tools",
+    "build_tools",
+    "TOOL_FACTORIES",
+    "DEFAULT_MODEL_ID",
+    "_interactive_loop",
+]
+
+
 if __name__ == "__main__":
-    import sys, io
-    if hasattr(sys.stdout, 'buffer'):
-        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-    agent.print_response("Summarize analyst recommendations and share the latest news for NVDA", stream=False)
+    main()

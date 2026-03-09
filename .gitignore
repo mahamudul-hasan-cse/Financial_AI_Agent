@@ -213,3 +213,6 @@ frontend/node_modules/
 # Claude Code
 .claude/
 CLAUDE.md
+
+# Generated outputs (charts, sheets, exports, caches)
+outputs/

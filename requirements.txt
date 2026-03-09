@@ -2,7 +2,27 @@ agno==1.8.4
 python-dotenv
 yfinance
 packaging
-duckduckgo-search
+ddgs
 fastapi
 uvicorn
 groq
+matplotlib
+pandas
+openpyxl
+
+# Resilience
+tenacity
+
+# PDF export
+reportlab
+
+# NLP pipeline
+spacy
+vaderSentiment
+sentence-transformers
+scikit-learn
+numpy
+
+# Testing
+pytest
+httpx
