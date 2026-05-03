@@ -39,6 +39,10 @@ class WatchlistItem(BaseModel):
     symbol: str
     price: float | None = Field(default=None, description="Current price (None if fetch failed).")
     change_pct: float | None = Field(default=None, description="Percentage change today.")
+    signal: str | None = Field(
+        default=None,
+        description="Short intelligence signal for the watchlist card.",
+    )
 
 
 class WatchlistResponse(BaseModel):

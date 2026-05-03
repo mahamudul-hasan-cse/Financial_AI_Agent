@@ -629,15 +629,16 @@ class TestGracefulFailures:
         assert len(sessions[sid]["messages"]) == 0
 
     def test_nlp_pipeline_failure_propagates(self, client: TestClient):
-        """If the NLP pipeline raises, the exception currently propagates.
-
-        This documents the existing behaviour — there is no try/except
-        around the NLP call in the chat endpoint.  A future improvement
-        could gracefully degrade to a default NLPMetadata.
-        """
+        """If the NLP pipeline raises, the API should fall back to defaults."""
         with patch("api.run_nlp_pipeline", side_effect=Exception("NLP boom")):
-            with pytest.raises(Exception, match="NLP boom"):
-                client.post("/api/chat", json={"message": "crash nlp"})
+            response = client.post("/api/chat", json={"message": "crash nlp"})
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["nlp_metadata"]["intent"] == "general"
+        assert payload["nlp_metadata"]["intent_method"] == "fallback"
+        assert payload["nlp_metadata"]["spacy_available"] is False
+        assert payload["nlp_metadata"]["vader_available"] is False
 
     def test_multiple_errors_then_recovery(self, client: TestClient, mock_agent):
         """After a failed request, subsequent requests should still work."""
@@ -748,3 +749,49 @@ class TestSchemaIntegration:
         assert res.status_code == 502
         parsed = ErrorResponse.model_validate(res.json())
         assert "error" in parsed.detail.lower()
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# NLP pipeline graceful degradation
+# ═══════════════════════════════════════════════════════════════════════
+class TestNLPPipelineGracefulDegradation:
+    """Verify that NLP pipeline failures don't crash chat endpoints."""
+
+    def test_chat_succeeds_when_nlp_pipeline_raises(self, client: TestClient):
+        """Chat should return 200 with default NLP metadata when the pipeline fails."""
+        with patch("api.run_nlp_pipeline", side_effect=RuntimeError("spaCy crashed")):
+            res = client.post("/api/chat", json={"message": "What is AAPL?"})
+        assert res.status_code == 200
+        data = res.json()
+        assert data["response"]  # agent still ran
+        meta = data["nlp_metadata"]
+        assert meta["intent"] == "general"
+        assert meta["intent_method"] == "fallback"
+        assert meta["entities"] == []
+
+    def test_stream_succeeds_when_nlp_pipeline_raises(self, client: TestClient):
+        """Streaming should emit default NLP metadata when the pipeline fails."""
+        with patch("api.run_nlp_pipeline", side_effect=RuntimeError("VADER crashed")):
+            res = client.post("/api/chat/stream", json={"message": "TSLA news"})
+        assert res.status_code == 200
+        body = res.text
+        assert "[NLP_META]" in body
+        # Extract NLP metadata from the SSE event
+        for line in body.splitlines():
+            if "[NLP_META]" in line:
+                raw = line.split("[NLP_META]", 1)[1]
+                meta = json.loads(raw)
+                assert meta["intent"] == "general"
+                assert meta["intent_method"] == "fallback"
+                break
+        assert "[DONE]" in body
+
+    def test_nlp_failure_still_tracks_stats(self, client: TestClient):
+        """Stats counters should still be updated even when NLP fails."""
+        from api import _stats
+
+        before = _stats["total_messages"]
+        with patch("api.run_nlp_pipeline", side_effect=RuntimeError("boom")):
+            client.post("/api/chat", json={"message": "test"})
+        assert _stats["total_messages"] == before + 1
+        assert _stats["classifier_usage"]["fallback"] >= 1

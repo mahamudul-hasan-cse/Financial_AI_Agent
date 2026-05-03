@@ -1,15 +1,60 @@
-.venv
-venv
-node_modules
-frontend/node_modules
-frontend/dist
-.git
-.github
-__pycache__
-*.pyc
-.pytest_cache
+# =============================================================================
+# .dockerignore — exclude files from the Docker build context
+# =============================================================================
+# Keep this file in sync with what Stage 2 of the Dockerfile actually needs.
+# Smaller context = faster builds and smaller images.
+
+# ── Virtual environments ──────────────────────────────────────────────────────
+.venv/
+venv/
+
+# ── Node / frontend build artefacts ──────────────────────────────────────────
+# node_modules are re-installed in Stage 1 via `npm ci`
+# dist is produced in Stage 1 and copied explicitly to Stage 2
+frontend/node_modules/
+frontend/dist/
+
+# ── Git / CI / editor metadata ────────────────────────────────────────────────
+.git/
+.github/
+.claude/
+.vscode/
+.idea/
+
+# ── Python byte-code and cache ────────────────────────────────────────────────
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.pytest_tmp/
+.coverage
+htmlcov/
+
+# ── Secrets — NEVER bake .env into the image ─────────────────────────────────
 .env
-tests
-.claude
+
+# ── Test suite (not needed in the production image) ──────────────────────────
+tests/
+
+# ── Generated runtime outputs (mounted as a volume at runtime) ───────────────
+outputs/
+
+# ── Runtime SQLite database (re-created at startup; not source data) ──────────
+data/*.db
+
+# ── Log files ─────────────────────────────────────────────────────────────────
+*.log
+run_stderr.log
+run_stdout.log
+
+# ── One-off analysis / evaluation scripts (not needed at runtime) ─────────────
+ablation_study.py
+error_analysis.py
+evaluation.py
+generate_visualizations.py
+
+# ── Documentation and metadata ────────────────────────────────────────────────
 *.md
+CLAUDE.md
 LICENSE

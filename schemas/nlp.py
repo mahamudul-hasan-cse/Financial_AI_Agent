@@ -26,6 +26,7 @@ class SentimentLabel(str, Enum):
     positive = "positive"
     negative = "negative"
     neutral = "neutral"
+    unavailable = "unavailable"
 
 
 # ── Sub-models ───────────────────────────────────────────────────────

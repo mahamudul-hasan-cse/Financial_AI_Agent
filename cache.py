@@ -17,13 +17,18 @@ Academic relevance:
 from __future__ import annotations
 
 import time
+from collections import OrderedDict
 from typing import Any
 
 # Default time-to-live in seconds
 DEFAULT_TTL: int = 300  # 5 minutes
 
+# Maximum cache entries before LRU eviction kicks in
+MAX_CACHE_SIZE: int = 1000
+
 # Internal cache store: key -> (value, expiry_timestamp)
-_cache: dict[str, tuple[Any, float]] = {}
+# OrderedDict preserves insertion/access order for LRU eviction
+_cache: OrderedDict[str, tuple[Any, float]] = OrderedDict()
 
 
 def get(key: str) -> Any | None:
@@ -42,18 +47,29 @@ def get(key: str) -> Any | None:
     if time.time() > expiry:
         _cache.pop(key, None)
         return None
+    # Move to end on access (most-recently used)
+    _cache.move_to_end(key)
     return value
 
 
 def set(key: str, value: Any, ttl: int = DEFAULT_TTL) -> None:
     """Store a value in the cache with a TTL.
 
+    Enforces MAX_CACHE_SIZE via LRU eviction: when the cache is full,
+    the oldest entry (least-recently inserted) is evicted first.
+
     Args:
         key: Cache key string.
         value: Value to cache.
         ttl: Time-to-live in seconds (default 300 = 5 minutes).
     """
+    # If key already exists, remove it so it moves to the end (most recent)
+    if key in _cache:
+        _cache.move_to_end(key)
     _cache[key] = (value, time.time() + ttl)
+    # Evict oldest entries if cache exceeds max size
+    while len(_cache) > MAX_CACHE_SIZE:
+        _cache.popitem(last=False)
 
 
 def invalidate(key: str) -> None:

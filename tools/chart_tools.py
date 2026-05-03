@@ -78,14 +78,19 @@ class ChartTools(Toolkit):
     ``artifacts`` is empty.
     """
 
-    def __init__(self, output_dir: str = "outputs/charts") -> None:
+    # Absolute path to the project's outputs/charts directory, resolved from
+    # this file so it is correct regardless of the process CWD.
+    _DEFAULT_OUTPUT_DIR: Path = Path(__file__).resolve().parent.parent / "outputs" / "charts"
+
+    def __init__(self, output_dir: str | Path | None = None) -> None:
         """Initialize ChartTools.
 
         Args:
-            output_dir: Directory to save chart images.
+            output_dir: Directory to save chart images.  Defaults to the
+                ``outputs/charts`` folder at the project root.
         """
         super().__init__(name="chart_tools")
-        self.output_dir = Path(output_dir)
+        self.output_dir = Path(output_dir) if output_dir else self._DEFAULT_OUTPUT_DIR
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
         self.register(self.create_stock_chart)

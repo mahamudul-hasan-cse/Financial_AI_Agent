@@ -1,11 +1,11 @@
 """NLP preprocessing pipeline for the Financial AI Agent.
 
-Provides four NLP capabilities that run before the LLM agent on every query:
+Provides three NLP capabilities that run before the LLM agent on every query:
 
 1. Named Entity Recognition (NER) — spaCy en_core_web_sm identifies organisations,
    products, and people; a lookup table maps known company names to ticker symbols.
    Bare TICKER patterns (ALL_CAPS 1-5 chars) are also detected via regex.
-   Financial-specific patterns detect FIN_METRIC, DATE_REF, and MONEY entities.
+   Financial-specific regex patterns detect FIN_METRIC, DATE_REF, and MONEY entities.
 
 2. Intent Classification — ML-based (TF-IDF + Logistic Regression) as primary,
    with keyword-pattern scoring as fallback. Returns both intent and confidence.
@@ -14,16 +14,18 @@ Provides four NLP capabilities that run before the LLM agent on every query:
    produces a compound polarity score and a positive / negative / neutral label.
    VADER requires no model download and is tuned for short, informal text.
 
-All three components degrade gracefully when optional libraries are unavailable.
+All components degrade gracefully when optional libraries are unavailable.
 """
 
+import json
+import pathlib
 import re
 from typing import TypedDict
 
 # ── spaCy NER ────────────────────────────────────────────────────────────────
 try:
     import spacy
-    _nlp = spacy.load("en_core_web_sm")
+    _nlp = spacy.load("en_core_web_md")
     SPACY_AVAILABLE = True
 except Exception:
     SPACY_AVAILABLE = False
@@ -46,47 +48,18 @@ except Exception:
     ML_CLASSIFIER_AVAILABLE = False
     _ml_predict_intent = None
 
-# ── Company name → ticker lookup ─────────────────────────────────────────────
-ORG_TO_TICKER: dict[str, str | None] = {
-    "apple": "AAPL",
-    "microsoft": "MSFT",
-    "google": "GOOGL",
-    "alphabet": "GOOGL",
-    "amazon": "AMZN",
-    "meta": "META",
-    "facebook": "META",
-    "tesla": "TSLA",
-    "nvidia": "NVDA",
-    "netflix": "NFLX",
-    "salesforce": "CRM",
-    "intel": "INTC",
-    "amd": "AMD",
-    "advanced micro devices": "AMD",
-    "paypal": "PYPL",
-    "shopify": "SHOP",
-    "disney": "DIS",
-    "uber": "UBER",
-    "lyft": "LYFT",
-    "airbnb": "ABNB",
-    "coinbase": "COIN",
-    "palantir": "PLTR",
-    "openai": None,
-    "berkshire": "BRK-B",
-    "jpmorgan": "JPM",
-    "j.p. morgan": "JPM",
-    "goldman sachs": "GS",
-    "bank of america": "BAC",
-    "twitter": "X",
-    "oracle": "ORCL",
-    "ibm": "IBM",
-    "qualcomm": "QCOM",
-    "broadcom": "AVGO",
-    "adobe": "ADBE",
-    "snap": "SNAP",
-    "spotify": "SPOT",
-    "doordash": "DASH",
-    "robinhood": "HOOD",
-}
+# ── Company name → ticker lookup (loaded from external JSON) ─────────────────
+_TICKER_MAP_PATH = pathlib.Path(__file__).parent / "data" / "company_tickers.json"
+
+def _load_ticker_map() -> dict[str, str | None]:
+    """Load company name → ticker mapping from data/company_tickers.json."""
+    try:
+        with open(_TICKER_MAP_PATH, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+ORG_TO_TICKER: dict[str, str | None] = _load_ticker_map()
 
 # ── Intent keyword patterns ──────────────────────────────────────────────────
 _INTENT_PATTERNS: dict[str, list[str]] = {
@@ -203,7 +176,13 @@ def extract_entities(text: str) -> list[dict]:
         List of dicts: [{"text": str, "label": str, "ticker": str | None}]
     """
     entities: list[dict] = []
-    seen: set[str] = set()
+    # Each pass uses its own seen set so spaCy tagging a word as ORG
+    # does not suppress it from also being detected as TICKER or FIN_METRIC.
+    seen_spacy: set[str] = set()
+    seen_fin_metric: set[str] = set()
+    seen_date_ref: set[str] = set()
+    seen_money: set[str] = set()
+    seen_ticker: set[str] = set()
 
     # spaCy pass — proper named entity recognition
     if SPACY_AVAILABLE and _nlp is not None:
@@ -212,43 +191,49 @@ def extract_entities(text: str) -> list[dict]:
             if ent.label_ not in ("ORG", "PERSON", "GPE", "PRODUCT"):
                 continue
             key = ent.text.lower().strip()
-            if key in seen:
+            if key in seen_spacy:
                 continue
-            seen.add(key)
+            seen_spacy.add(key)
             ticker = ORG_TO_TICKER.get(key)
+            # If spaCy tagged a bare all-caps word as ORG and it looks like a
+            # ticker symbol, fill in the ticker field so the entity carries the
+            # correct symbol. The ticker regex still runs independently so a
+            # proper TICKER-labelled entity is also emitted.
+            if ticker is None and re.match(r'^[A-Z]{1,5}$', ent.text) and ent.text not in _TICKER_STOPWORDS:
+                ticker = ent.text
             entities.append({"text": ent.text, "label": ent.label_, "ticker": ticker})
 
-    # Financial metric patterns (FIN_METRIC) — run before ticker regex
-    # so that terms like RSI, EPS are classified as metrics, not tickers
+    # Financial metric patterns (FIN_METRIC) — independent of spaCy seen set
     for match in _FIN_METRIC_PATTERN.finditer(text):
         metric_text = match.group(0).strip()
         key = metric_text.lower()
-        if key not in seen:
-            seen.add(key)
+        if key not in seen_fin_metric:
+            seen_fin_metric.add(key)
             entities.append({"text": metric_text, "label": "FIN_METRIC", "ticker": None})
 
     # Date/quarter reference patterns (DATE_REF)
     for match in _DATE_REF_PATTERN.finditer(text):
         date_text = match.group(0).strip()
         key = date_text.lower()
-        if key not in seen:
-            seen.add(key)
+        if key not in seen_date_ref:
+            seen_date_ref.add(key)
             entities.append({"text": date_text, "label": "DATE_REF", "ticker": None})
 
     # Currency amount patterns (MONEY)
     for match in _MONEY_PATTERN.finditer(text):
         money_text = match.group(0).strip()
         key = money_text.lower()
-        if key not in seen:
-            seen.add(key)
+        if key not in seen_money:
+            seen_money.add(key)
             entities.append({"text": money_text, "label": "MONEY", "ticker": None})
 
     # Regex pass — detect bare ticker symbols (ALL_CAPS, 1–5 chars)
+    # Uses its own seen set so spaCy-detected words are still checked.
     for match in re.finditer(r'\b([A-Z]{1,5})\b', text):
         t = match.group(1)
-        if t in _TICKER_STOPWORDS or t.lower() in seen:
+        if t in _TICKER_STOPWORDS or t in seen_fin_metric or t.lower() in seen_ticker:
             continue
-        seen.add(t.lower())
+        seen_ticker.add(t.lower())
         entities.append({"text": t, "label": "TICKER", "ticker": t})
 
     return entities
@@ -279,23 +264,49 @@ def classify_intent(text: str) -> str:
 
 
 def classify_intent_with_confidence(text: str) -> tuple[str, float, str]:
-    """Classify intent using ML classifier (primary) or keyword fallback.
+    """Classify intent using the ML classifier with keyword fallback.
+
+    Strategy:
+      - If the ML classifier is available, use it for medium/high confidence
+        predictions and only fall back to keyword matching when confidence is
+        too low to trust.
+      - If ML is unavailable, use the keyword classifier.
+
+    This keeps the public intent-method labels limited to "ml" and
+    "keyword", which matches the API schema and analytics counters.
 
     Args:
         text: Raw user input string.
 
     Returns:
-        Tuple of (intent, confidence, method) where method is "ml" or "keyword".
+        Tuple of (intent, confidence, method) where method is
+        "ml" or "keyword".
     """
+    keyword_intent = classify_intent(text)
+
     if ML_CLASSIFIER_AVAILABLE and _ml_predict_intent is not None:
         try:
-            intent, confidence = _ml_predict_intent(text)
-            return (intent, confidence, "ml")
+            ml_intent, ml_confidence = _ml_predict_intent(text)
+
+            if ml_confidence >= 0.6:
+                return (ml_intent, ml_confidence, "ml")
+
+            if ml_confidence >= 0.3:
+                if ml_intent == keyword_intent:
+                    boosted = min(ml_confidence + 0.15, 1.0)
+                    return (ml_intent, round(boosted, 4), "ml")
+
+                reduced = ml_confidence * 0.8
+                return (ml_intent, round(reduced, 4), "ml")
+
+            if keyword_intent != "general":
+                return (keyword_intent, 0.0, "keyword")
+            return (ml_intent, ml_confidence, "ml")
+
         except Exception:
             pass
 
-    # Keyword fallback — confidence is 0 since keyword matching is rule-based
-    return (classify_intent(text), 0.0, "keyword")
+    return (keyword_intent, 0.0, "keyword")
 
 
 def analyze_sentiment(text: str) -> dict:

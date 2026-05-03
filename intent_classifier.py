@@ -19,7 +19,6 @@ from __future__ import annotations
 import logging
 import re
 import string
-from typing import Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +64,7 @@ def preprocess_text(text: str) -> str:
 
 # ── Training data ────────────────────────────────────────────────────────────
 # ~25 examples per intent, 8 intents = ~200 labeled training samples.
-TRAINING_DATA: list[Tuple[str, str]] = [
+TRAINING_DATA: list[tuple[str, str]] = [
     # stock_price
     ("What is the current price of AAPL?", "stock_price"),
     ("How much is Tesla stock trading at today?", "stock_price"),
@@ -310,9 +309,7 @@ def _train_model() -> "Pipeline | None":
     pipeline = Pipeline([
         ("tfidf", TfidfVectorizer(
             ngram_range=(1, 2),
-            max_features=5000,
             stop_words="english",
-            sublinear_tf=True,
         )),
         ("clf", LogisticRegression(
             max_iter=1000,
@@ -327,7 +324,7 @@ def _train_model() -> "Pipeline | None":
     return _model
 
 
-def predict_intent(text: str) -> Tuple[str, float]:
+def predict_intent(text: str) -> tuple[str, float]:
     """Predict intent using the ML classifier.
 
     Args:

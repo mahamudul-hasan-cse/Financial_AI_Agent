@@ -11,10 +11,12 @@ from fastapi.testclient import TestClient
 def _clear_sessions():
     """Reset in-memory session, rate-limit, and stats stores between tests."""
     from api import sessions, _rate_limits, _ip_rate_limits, _stats
+    from persistence import reset_for_tests
 
     sessions.clear()
     _rate_limits.clear()
     _ip_rate_limits.clear()
+    reset_for_tests()
     _stats["total_messages"] = 0
     _stats["total_sessions_created"] = 0
     _stats["intent_counts"] = defaultdict(int)
@@ -24,6 +26,7 @@ def _clear_sessions():
     sessions.clear()
     _rate_limits.clear()
     _ip_rate_limits.clear()
+    reset_for_tests()
 
 
 @pytest.fixture()

@@ -214,5 +214,44 @@ frontend/node_modules/
 .claude/
 CLAUDE.md
 
-# Generated outputs (charts, sheets, exports, caches)
-outputs/
+# Generated outputs — keep folder structure, ignore generated files
+outputs/charts/*.png
+outputs/sheets/*.xlsx
+outputs/reports/*.pdf
+outputs/*.pdf
+outputs/.embedding_cache/
+
+# ML model files (too large for git)
+*.pkl
+*.joblib
+*.bin
+*.safetensors
+models/
+
+# spaCy downloaded models
+en_core_web_md/
+en_core_web_sm/
+
+# SQLite database
+*.db
+*.sqlite3
+
+# Pytest temp
+.pytest_tmp/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+Thumbs.db
+desktop.ini
+
+# Frontend
+frontend/.vite/
+
+# Sentence-transformers cache (large model weights)
+.cache/
+sentence_transformers/

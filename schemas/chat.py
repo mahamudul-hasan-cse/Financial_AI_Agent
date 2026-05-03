@@ -11,6 +11,7 @@ import re
 from pydantic import BaseModel, Field, field_validator
 
 from schemas.nlp import NLPMetadataSchema
+from schemas.research import ResearchResponse
 
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
 
@@ -46,9 +47,17 @@ class ChatResponse(BaseModel):
 
     response: str = Field(..., description="Agent textual reply.")
     session_id: str = Field(..., description="Session ID for follow-up calls.")
+    session_title: str | None = Field(
+        default=None,
+        description="Human-friendly saved session title.",
+    )
     nlp_metadata: NLPMetadataSchema | None = Field(
         default=None,
         description="NLP analysis of the user query.",
+    )
+    structured_response: ResearchResponse | None = Field(
+        default=None,
+        description="Structured investor answer card rendered by the frontend.",
     )
 
 

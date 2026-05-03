@@ -16,8 +16,8 @@ from backend.app.agent.prompts import (              # noqa: F401
     AGENT_INSTRUCTIONS,
 )
 from backend.app.agent.tool_registry import (        # noqa: F401
-    build_tools as _build_tools,
     build_tools,
+    build_tools as _build_tools,
     TOOL_FACTORIES,
 )
 from backend.app.agent.financial_agent import (      # noqa: F401
@@ -27,6 +27,7 @@ from backend.app.agent.financial_agent import (      # noqa: F401
     create_agent,
     main,
     DEFAULT_MODEL_ID,
+    LLM_PROVIDER,
     _interactive_loop,
 )
 
@@ -39,11 +40,10 @@ __all__ = [
     "AGENT_INSTRUCTIONS",
     "TOOL_CATALOGUE",
     "BEHAVIOURAL_RULES",
-    "_build_tools",
     "build_tools",
     "TOOL_FACTORIES",
     "DEFAULT_MODEL_ID",
-    "_interactive_loop",
+    "LLM_PROVIDER",
 ]
 
 

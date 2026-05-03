@@ -1,152 +1,91 @@
-# Financial AI Agent
+# Financial AI Agent — CSE495B NLP Project
 
-A full-stack financial analysis assistant powered by LLMs. It combines real-time stock market data with web search intelligence to deliver comprehensive financial insights through a custom-built chat interface.
+A full-stack financial research assistant that combines a production-grade NLP pipeline with a Groq-hosted LLM and an interactive React chat interface. Built for CSE495B (Natural Language Processing).
 
 ---
 
 ## Architecture
 
-```
-┌────────────────────────────────────────────────────────────────────────────┐
-│  React Frontend  :5173 (dev) / :8000 (prod)                                │
-│  ┌─ Chat UI (App.jsx) ─────────────────────────────────────────────────┐   │
-│  │  User message → POST /api/chat/stream (SSE)                         │   │
-│  │  SSE event 1: [NLP_META] { entities, intent, sentiment }            │   │
-│  │  SSE event 2…N: streamed LLM response tokens                        │   │
-│  │  NLPPanel: shows intent / entities / sentiment per message          │   │
-│  │  StockChart: auto-converts markdown tables to interactive charts    │   │
-│  └────────────────────────────────────────────────────────────────────┘   │
-└──────────────────────────────┬─────────────────────────────────────────────┘
-                               │ SSE / REST
-┌──────────────────────────────▼─────────────────────────────────────────────┐
-│  FastAPI Backend  (api.py)                                                  │
-│                                                                             │
-│  ① NLP Preprocessing Pipeline  (nlp_pipeline.py)                           │
-│     ├─ Named Entity Recognition  — spaCy en_core_web_sm                    │
-│     ├─ Intent Classification     — keyword pattern scoring (7 intents)      │
-│     └─ Sentiment Analysis        — VADER compound polarity score            │
-│                                                                             │
-│  ② agno Agent  (financial_agent.py)                                         │
-│     ├─ YFinanceTools    — stock price, fundamentals, news, recommendations  │
-│     ├─ DuckDuckGoTools  — web search + financial news                       │
-│     ├─ ChartTools       — matplotlib stock & comparison charts              │
-│     ├─ ExcelTools       — multi-sheet styled Excel reports                  │
-│     └─ RAGTools         — dense/sparse retrieval over financial knowledge   │
-│                                                                             │
-│  ③ Session management • Rate limiting • Analytics (/api/stats)              │
-└──────────────────────────────┬─────────────────────────────────────────────┘
-                               │
-┌──────────────────────────────▼─────────────────────────────────────────────┐
-│  External Services                                                          │
-│  Groq API (Llama 4 Scout)  •  Yahoo Finance  •  DuckDuckGo Search          │
-└────────────────────────────────────────────────────────────────────────────┘
-```
-
-**Single Agent Design** — one unified agent handles all tools directly, avoiding multi-agent delegation overhead that Groq models handle poorly.
-
-In production, FastAPI serves both the API and the React build on a single port (8000).
+| Layer | Technology |
+|---|---|
+| **LLM Backend** | Groq API — `meta-llama/llama-4-scout-17b-16e-instruct` |
+| **Local LLM** | Ollama — `qwen2.5:3b` (offline fallback) |
+| **Agent Framework** | agno 1.8.4 |
+| **API** | FastAPI + SSE streaming |
+| **NLP Pipeline** | spaCy `en_core_web_md` + VADER + TF-IDF Intent Classifier |
+| **RAG Embeddings** | `sentence-transformers/all-mpnet-base-v2` (768-dim) |
+| **Frontend** | React 19 + Vite 7 + Recharts |
 
 ---
 
-## NLP Techniques
+## NLP Components
 
-This project implements a multi-stage NLP pipeline that runs on every user query:
+| # | Component | Model / Library | Purpose |
+|---|---|---|---|
+| 1 | **Named Entity Recognition** | spaCy `en_core_web_md` | Extracts ORG, PERSON, GPE, PRODUCT entities |
+| 2 | **Financial NER** | Custom regex patterns | Extracts TICKER, FIN_METRIC, DATE_REF, MONEY |
+| 3 | **Sentiment Analysis** | VADER (`nltk`) | Compound score + positive/neutral/negative label |
+| 4 | **Intent Classification (ML)** | TF-IDF + Logistic Regression | 8-class intent; 93.75% accuracy on gold-standard set |
+| 5 | **Intent Classification (KW)** | Keyword matching | Fallback when ML confidence < threshold |
+| 6 | **RAG Retrieval** | `all-mpnet-base-v2` + BM25 re-ranking | Query expansion + source citations |
 
-| Technique | Implementation | Purpose |
-|-----------|---------------|---------|
-| **Named Entity Recognition (NER)** | spaCy `en_core_web_sm` | Extract company names, products, and map to ticker symbols |
-| **Intent Classification** | Keyword pattern scoring (7 intents) | Route queries: stock_price / chart / comparison / news / fundamentals / recommendation / excel |
-| **Sentiment Analysis** | VADER (Valence Aware Dictionary and sEntiment Reasoner) | Polarity scoring without model download; tuned for financial short text |
-| **Retrieval-Augmented Generation (RAG)** | sentence-transformers `all-MiniLM-L6-v2` + cosine similarity (TF-IDF fallback) | Ground LLM responses in a curated financial knowledge base |
-| **Tool-Augmented LLM** | agno agent framework + function calling | Live stock data retrieval instead of hallucinated answers |
-| **Streaming Inference** | Server-Sent Events (SSE) | Real-time token-by-token response delivery |
-| **Prompt Engineering** | Structured system instructions | Consistent output format and tool usage patterns |
+---
 
-The NLP pipeline results (intent, entities, sentiment) are visible in the **NLP Analysis panel** displayed above each agent response in the chat UI.
+## Agent Tools (14 total)
+
+**Stock Data (YFinance)**
+- `get_current_stock_price` — real-time price and change
+- `get_stock_fundamentals` — P/E, EPS, market cap, revenue
+- `get_analyst_recommendations` — buy/hold/sell breakdown
+- `get_company_news` — recent headlines
+
+**Web Search (DuckDuckGo)**
+- `duckduckgo_search` — general web search
+- `duckduckgo_news` — news search
+
+**Chart Generation (matplotlib)**
+- `create_stock_chart` — line chart with fill and price annotation
+- `create_comparison_bar_chart` — side-by-side stock price comparison
+- `create_comparison_overlay_chart` — normalized overlay chart
+- `generate_line_chart` — generic line chart from data
+- `generate_bar_chart` — generic bar chart from data
+- `generate_pie_chart` — generic pie chart from data
+
+**Excel Reports (openpyxl + pandas)**
+- `create_stock_excel_report` — multi-sheet report (Summary, Fundamentals, Price History)
+- `create_comparison_excel` — side-by-side comparison workbook
+- `create_excel_sheet` — generic data-to-Excel export
 
 ---
 
 ## Features
 
-- **NLP Analysis panel** — shows detected entities, query intent, and sentiment for every message
-- **Real-time stock prices** — live quotes via YFinance
-- **Analyst recommendations** — buy/hold/sell consensus data
-- **Company fundamentals** — key financial metrics and ratios
-- **Web search** — latest financial news via DuckDuckGo
-- **RAG knowledge retrieval** — grounding via dense/sparse document retrieval
-- **Interactive stock charts** — automatic chart rendering when price data is returned
-- **Markdown rendering** — tables, bold, links rendered in chat
-- **Streaming responses** — SSE-based real-time token streaming
-- **Conversation memory** — multi-turn conversations with context
-- **Chat export** — download conversation as markdown file
-- **Contextual suggestions** — smart follow-up suggestions based on conversation
-- **Dark-themed chat UI** — responsive design with loading indicators
-- **Analytics endpoint** — `/api/stats` for usage statistics and intent distribution
-- **Rate limiting** — per-session rate limiting to prevent abuse
-- **Session management** — automatic cleanup of idle sessions
+- **Streaming responses** via SSE with real-time token delivery
+- **Intent-aware formatting** — each intent (stock_price, chart, comparison, news, fundamentals, recommendation, excel, general) has its own response format rules
+- **NLP metadata panel** — shows detected intent + confidence %, entities, sentiment in a collapsible UI panel
+- **Chart display** — generated PNG charts appear inline in the chat
+- **Excel download** — generated reports are directly downloadable
+- **Session management** — persistent chat history with rename and delete
+- **Dark / light mode** with localStorage persistence
+- **Voice output** via Web Speech API
+- **Starter prompts** and follow-up suggestions
+- **RAG** with query expansion and source citations
+- **Quantitative evaluation** — 80-example gold-standard test set, per-class P/R/F1
 
 ---
 
-## Tech Stack
+## Academic Results
 
-| Layer     | Technology                                                    |
-|-----------|---------------------------------------------------------------|
-| LLM       | Groq — `meta-llama/llama-4-scout-17b-16e-instruct`           |
-| Agent     | agno 1.8.4                                                    |
-| NER       | spaCy `en_core_web_sm`                                        |
-| Sentiment | VADER (`vaderSentiment`)                                      |
-| RAG       | `sentence-transformers` (all-MiniLM-L6-v2) + scikit-learn    |
-| Backend   | FastAPI + Uvicorn                                             |
-| Frontend  | React 19 + Vite 7 + Recharts                                 |
-| Data      | YFinance, DuckDuckGo Search                                   |
-| Rendering | react-markdown + remark-gfm                                   |
-| Testing   | pytest + httpx                                                |
-| CI/CD     | GitHub Actions                                                |
-| Deploy    | Docker + Docker Compose                                       |
-
----
-
-## Project Structure
-
-```
-Ai_Agent/
-├── financial_agent.py       # Agent definition (single source of truth)
-├── api.py                   # FastAPI backend (NLP pipeline + sessions + rate limiting)
-├── nlp_pipeline.py          # NLP: spaCy NER + VADER sentiment + intent classifier
-├── requirements.txt         # Python dependencies
-├── pyproject.toml           # Pytest configuration
-├── Dockerfile               # Multi-stage Docker build
-├── docker-compose.yml       # Single-command deployment
-├── .env.example             # Environment variable template
-├── .gitignore
-├── LICENSE
-├── README.md
-├── .github/
-│   └── workflows/
-│       └── ci.yml           # GitHub Actions CI pipeline
-├── tools/
-│   ├── chart_tools.py       # matplotlib chart generation (5 tools)
-│   ├── excel_tools.py       # openpyxl Excel report generation (3 tools)
-│   └── rag_tools.py         # RAG: dense/sparse retrieval over financial knowledge
-├── tests/
-│   ├── conftest.py          # Shared test fixtures
-│   ├── test_api.py          # Backend API tests
-│   ├── test_agent.py        # Agent configuration tests
-│   ├── test_nlp_pipeline.py # NLP pipeline unit tests (intent/sentiment/NER)
-│   ├── test_chart_tools.py  # Chart tool tests (yfinance mocked)
-│   └── test_excel_tools.py  # Excel tool tests (yfinance mocked)
-└── frontend/
-    ├── index.html
-    ├── package.json
-    ├── vite.config.js       # Dev proxy: /api → localhost:8000
-    └── src/
-        ├── main.jsx         # Entry point with ErrorBoundary
-        ├── App.jsx          # Chat UI component
-        ├── App.css          # Dark theme styles (CSS variables)
-        ├── ErrorBoundary.jsx # React error boundary
-        ├── NLPPanel.jsx     # NLP analysis panel (intent + entities + sentiment)
-        └── StockChart.jsx   # Interactive price chart component
-```
+| Metric | Value |
+|---|---|
+| Intent classifier accuracy | **93.75%** (80-example gold-standard set) |
+| Cross-validation accuracy | 75.5% (TF-IDF n-gram 1-2) |
+| Test suite | **310 tests passing** |
+| Test coverage | **66%** |
+| LLM latency (Groq) | ~500 ms |
+| LLM latency (Ollama qwen2.5:3b) | ~2 500 ms |
+| RAG embedding model | all-mpnet-base-v2 (768-dim) |
+| spaCy model | en_core_web_md |
 
 ---
 
@@ -154,110 +93,69 @@ Ai_Agent/
 
 ### Prerequisites
 
-- Python 3.10+
+- Python 3.11+
 - Node.js 18+
-- A [Groq API key](https://console.groq.com)
+- A [Groq API key](https://console.groq.com/) (free tier available)
+- *(Optional)* [Ollama](https://ollama.ai/) for local inference
 
-### 1. Clone the repository
-
-```bash
-git clone https://github.com/mahamudul-hasan-cse/Financial_AI_Agent.git
-cd Financial_AI_Agent
-```
-
-### 2. Create Python virtual environment
+### Backend
 
 ```bash
+cd Ai_Agent
 python -m venv .venv
-```
-
-Activate it:
-
-```bash
-# Windows
-.venv\Scripts\activate
-
-# macOS / Linux
-source .venv/bin/activate
-```
-
-### 3. Install Python dependencies
-
-```bash
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
+python -m spacy download en_core_web_md
 ```
 
-### 3a. Download the spaCy NER model (required for entity extraction)
+### Frontend
 
 ```bash
-python -m spacy download en_core_web_sm
-```
-
-> The sentence-transformers RAG model (`all-MiniLM-L6-v2`, ~90 MB) is downloaded
-> automatically on first run. The agent works without it but falls back to TF-IDF retrieval.
-
-### 4. Install frontend dependencies
-
-```bash
-cd frontend
+cd Ai_Agent/frontend
 npm install
-cd ..
 ```
 
-### 5. Configure environment variables
+### Environment Variables
 
-```bash
-cp .env.example .env
-```
+Create `Ai_Agent/.env`:
 
-Edit `.env` and add your Groq API key:
+| Variable | Required | Description |
+|---|---|---|
+| `GROQ_API_KEY` | Yes | Groq API key |
+| `OLLAMA_BASE_URL` | No | Ollama URL (default: `http://localhost:11434`) |
+| `OLLAMA_MODEL` | No | Ollama model (default: `qwen2.5:3b`) |
+| `LLM_PROVIDER` | No | `groq` or `ollama` (default: `groq`) |
 
-```
-GROQ_API_KEY=your_groq_api_key_here
-```
-
----
-
-## Running the App
-
-### Development (two terminals)
+### Running
 
 ```bash
 # Terminal 1 — Backend
+cd Ai_Agent
 python api.py
-# API running at http://localhost:8000
+# → http://localhost:8001
 
-# Terminal 2 — Frontend
-cd frontend && npm run dev
-# UI running at http://localhost:5173
-```
+# Terminal 2 — Frontend (dev)
+cd Ai_Agent/frontend
+npm run dev
+# → http://localhost:5173
 
-### Production (single port)
-
-```bash
-cd frontend && npm run build && cd ..
+# Production (single port)
+cd Ai_Agent/frontend && npm run build && cd ..
 python api.py
-# Everything at http://localhost:8000
+# → http://localhost:8001
 ```
 
-### Docker
+### Running with Ollama (local, no API key needed)
 
 ```bash
-docker-compose up --build
-# App at http://localhost:8000
-```
+# Install and pull the model
+ollama pull qwen2.5:3b
 
-### CLI mode (no web UI)
+# Set provider in .env
+echo "LLM_PROVIDER=ollama" >> .env
 
-```bash
-# Interactive mode
-python financial_agent.py
-
-# Single query
-python financial_agent.py "What is the current price of AAPL?"
-
-# Streaming output
-python financial_agent.py --stream "Compare NVDA vs AMD"
+# Start backend as normal
+python api.py
 ```
 
 ---
@@ -265,119 +163,92 @@ python financial_agent.py --stream "Compare NVDA vs AMD"
 ## Running Tests
 
 ```bash
-# Run all tests
-pytest
+cd Ai_Agent
+pytest --tb=short -q
+# 310 passed
 
-# Run with verbose output
-pytest -v
-
-# Run a specific test file
-pytest tests/test_api.py
+# With coverage
+pytest --cov=. --cov-report=term-missing
 ```
 
----
-
-## API Endpoints
-
-| Method | Endpoint              | Description                                    |
-|--------|-----------------------|------------------------------------------------|
-| GET    | `/api/health`         | Health check (Groq key + NLP pipeline status)  |
-| GET    | `/api/stats`          | Analytics: message counts, intent distribution |
-| POST   | `/api/chat`           | Send message (non-streaming, includes NLP meta)|
-| POST   | `/api/chat/stream`    | Send message (SSE streaming + NLP meta event)  |
-| DELETE | `/api/chat/{session}` | Clear session history                          |
-
-### Example request
+### Evaluation scripts
 
 ```bash
-curl -X POST http://localhost:8000/api/chat \
-  -H "Content-Type: application/json" \
-  -d '{"message": "What is the current price of AAPL?"}'
-```
+# Quantitative NLP evaluation (80-example gold-standard set)
+python evaluation.py
 
-### Example response (includes NLP metadata)
-
-```json
-{
-  "response": "The current price of AAPL is **$265.72** ...",
-  "session_id": "a1b2c3d4-...",
-  "nlp_metadata": {
-    "entities": [{"text": "AAPL", "label": "TICKER", "ticker": "AAPL"}],
-    "intent": "stock_price",
-    "sentiment": {"label": "neutral", "score": 0.831, "compound": 0.0},
-    "spacy_available": true,
-    "vader_available": true
-  }
-}
-```
-
-### Streaming SSE events
-
-```
-data: [NLP_META]{"entities":[...],"intent":"stock_price","sentiment":{...}}
-
-data: The current price of AAPL is
-
-data:  **$265.72**...
-
-data: [DONE]
+# Ablation study (impact of each NLP component)
+python ablation_study.py
 ```
 
 ---
 
-## Example Use Cases
+## Project Structure
 
-- Stock market research and live price checks
-- Analyst recommendation summaries
-- Company financial fundamentals analysis
-- Real-time financial news monitoring
-- AI-powered investment research assistant
-
----
-
-## Academic Relevance (CSE495B — NLP)
-
-This project demonstrates a comprehensive range of NLP and AI techniques:
-
-### Core NLP Concepts
-- **Named Entity Recognition (NER)** — spaCy pipeline extracts ORG, PRODUCT, and TICKER entities from free-form text, with a ticker symbol resolution lookup table
-- **Text Classification / Intent Detection** — scored keyword-pattern approach classifies queries into 7 domain-specific financial intents without requiring a labelled dataset
-- **Sentiment Analysis** — VADER lexicon-based polarity scoring; appropriate for short financial queries and news headlines
-- **Retrieval-Augmented Generation (RAG)** — dense retrieval (sentence-transformers cosine similarity) grounds LLM responses in verified financial knowledge, reducing hallucination
-
-### Advanced NLP / ML
-- **Transformer Embeddings** — `all-MiniLM-L6-v2` encodes document chunks and queries into 384-dimensional dense vectors for semantic similarity matching
-- **Sparse Retrieval (TF-IDF)** — fallback retriever shows understanding of both dense and sparse retrieval trade-offs
-- **Tool-Augmented LLMs / Function Calling** — agent dynamically selects and calls external tools (function calling), grounding answers in real-time data
-- **Prompt Engineering** — structured system instructions guide consistent formatting, tool usage patterns, and output style
-
-### System Design
-- **Full-Stack AI Application** — React frontend + FastAPI backend + LLM agent
-- **Streaming Inference** — Server-Sent Events deliver tokens in real-time
-- **Explainability** — NLP pipeline outputs (intent, entities, sentiment) are visible in the UI, making the AI decision process transparent
-- **Production Readiness** — Docker, GitHub Actions CI/CD, pytest test suite, rate limiting, session management
-- **Analytics** — `/api/stats` endpoint exposes intent distribution and usage metrics
-
----
-
-## Author
-
-**Md. Mahamudul Hasan**
-CSE Student | AI & NLP Enthusiast
-
-GitHub: [mahamudul-hasan-cse](https://github.com/mahamudul-hasan-cse)
+```
+Ai_Agent/
+├── api.py                        # FastAPI backend (SSE streaming, sessions, NLP)
+├── financial_agent.py            # Agent shim → backend/app/agent/
+├── nlp_pipeline.py               # spaCy NER + VADER + intent pipeline
+├── intent_classifier.py          # TF-IDF + LogisticRegression (8-class)
+├── evaluation.py                 # Quantitative NLP evaluation
+├── ablation_study.py             # NLP component ablation study
+├── research_service.py           # Structured response builder
+├── market_service.py             # Market context helpers
+├── persistence.py                # SQLite session/alert persistence
+├── cache.py                      # In-memory cache layer
+├── config.py                     # App settings (pydantic)
+├── requirements.txt
+├── pyproject.toml                # pytest config
+├── Dockerfile
+├── docker-compose.yml
+│
+├── backend/app/agent/
+│   ├── financial_agent.py        # agno Agent construction
+│   ├── tool_registry.py          # Toolkit factory with graceful degradation
+│   └── prompts.py                # System prompt + intent format rules
+│
+├── tools/
+│   ├── chart_tools.py            # matplotlib PNG generation (self-contained)
+│   ├── excel_tools.py            # openpyxl Excel reports (self-contained)
+│   └── rag_tools.py              # RAG: query expansion + re-ranking + citations
+│
+├── schemas/
+│   ├── chat.py                   # Request/response models
+│   ├── nlp.py                    # NLPMetadata TypedDict
+│   └── streaming.py              # SSE event models
+│
+├── tests/
+│   ├── test_nlp_pipeline.py      # 45 NLP tests
+│   ├── test_intent_classifier.py # 16 classifier tests
+│   ├── test_evaluation.py        # 13 evaluation tests
+│   ├── test_api.py               # API endpoint tests
+│   ├── test_agent.py             # Agent config tests
+│   ├── test_chart_tools.py       # Chart tool tests
+│   └── test_excel_tools.py       # Excel tool tests
+│
+├── data/
+│   └── company_tickers.json      # Ticker → company name mapping
+│
+├── outputs/
+│   ├── charts/                   # Generated PNG charts (git-ignored)
+│   └── sheets/                   # Generated Excel files (git-ignored)
+│
+└── frontend/
+    ├── src/
+    │   ├── App.jsx               # Main chat UI
+    │   ├── App.css               # Design tokens + dark/light theme
+    │   ├── ResearchCard.jsx      # Message renderer + inline chart display
+    │   ├── NLPPanel.jsx          # Intent/entity/sentiment display panel
+    │   ├── StockChart.jsx        # Auto-recharts from markdown tables
+    │   ├── SessionsSidebar.jsx   # Chat history sidebar
+    │   └── ErrorBoundary.jsx
+    ├── package.json
+    └── vite.config.js            # Dev proxy: /api + /outputs → :8001
+```
 
 ---
 
 ## License
 
-This project is licensed under the [MIT License](LICENSE).
-
----
-
-## Acknowledgements
-
-- [agno](https://github.com/agno-agi/agno) — AI Agent Framework
-- [Groq](https://groq.com) — LLM Inference Platform
-- [Yahoo Finance](https://finance.yahoo.com) — Stock Market Data
-- [DuckDuckGo](https://duckduckgo.com) — Web Search API
+Academic project — CSE495B, Spring 2026.

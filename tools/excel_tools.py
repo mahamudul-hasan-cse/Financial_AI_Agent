@@ -33,15 +33,18 @@ import cache
 class ExcelTools(Toolkit):
     """Toolkit for creating and manipulating Excel spreadsheets."""
 
-    def __init__(self, output_dir: str = "outputs/sheets"):
+    _DEFAULT_OUTPUT_DIR: Path = Path(__file__).resolve().parent.parent / "outputs" / "sheets"
+
+    def __init__(self, output_dir: str | Path | None = None):
         """
         Initialize ExcelTools.
 
         Args:
-            output_dir: Directory to save Excel files.
+            output_dir: Directory to save Excel files.  Defaults to the
+                ``outputs/sheets`` folder at the project root.
         """
         super().__init__(name="excel_tools")
-        self.output_dir = Path(output_dir)
+        self.output_dir = Path(output_dir) if output_dir else self._DEFAULT_OUTPUT_DIR
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
         self.register(self.create_stock_excel_report)
@@ -174,51 +177,15 @@ class ExcelTools(Toolkit):
     ) -> str:
         """Create a styled Excel file from a DataFrame."""
         df.to_excel(filepath, sheet_name=sheet_name, index=False)
-
-        wb = openpyxl.load_workbook(filepath)
-        ws = wb.active
-
-        header_font = Font(bold=True, color="FFFFFF")
-        header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
-        header_alignment = Alignment(horizontal="center", vertical="center")
-
-        thin_border = Border(
-            left=Side(style="thin"),
-            right=Side(style="thin"),
-            top=Side(style="thin"),
-            bottom=Side(style="thin"),
-        )
-
-        for cell in ws[1]:
-            cell.font = header_font
-            cell.fill = header_fill
-            cell.alignment = header_alignment
-            cell.border = thin_border
-
-        for row in ws.iter_rows(min_row=2, max_row=ws.max_row):
-            for cell in row:
-                cell.border = thin_border
-                cell.alignment = Alignment(horizontal="center")
-
-        for column in ws.columns:
-            max_length = 0
-            column_letter = column[0].column_letter
-            for cell in column:
-                try:
-                    if len(str(cell.value)) > max_length:
-                        max_length = len(str(cell.value))
-                except TypeError:
-                    pass
-            adjusted_width = min(max_length + 2, 50)
-            ws.column_dimensions[column_letter].width = adjusted_width
-
-        wb.save(filepath)
-        wb.close()
-
+        self._apply_workbook_styling(filepath)
         return f"Excel file saved as {filepath.name}"
 
     def _apply_workbook_styling(self, filepath: Path) -> None:
-        """Apply professional styling to all sheets in a workbook."""
+        """Apply professional styling to all sheets in a workbook.
+
+        Blue headers with white text, thin borders, centered alignment,
+        and auto-width columns.
+        """
         wb = openpyxl.load_workbook(filepath)
 
         header_font = Font(bold=True, color="FFFFFF")

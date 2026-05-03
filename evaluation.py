@@ -11,13 +11,13 @@ Run directly: python evaluation.py
 
 from __future__ import annotations
 
+import random
 import sys
 from collections import defaultdict
-from typing import Tuple
 
 # ── Gold-standard test set for intent classification ─────────────────────────
 # 80 labeled examples (10 per intent) — held out from training data.
-INTENT_TEST_SET: list[Tuple[str, str]] = [
+INTENT_TEST_SET: list[tuple[str, str]] = [
     # stock_price (10)
     ("What's AAPL stock price right now?", "stock_price"),
     ("How much is a share of Google today?", "stock_price"),
@@ -118,7 +118,7 @@ INTENT_TEST_SET: list[Tuple[str, str]] = [
 # ── NER test set ─────────────────────────────────────────────────────────────
 # Each entry: (text, expected_entities) where expected_entities is a list of
 # dicts with at minimum {"text": ..., "label": ...}
-NER_TEST_SET: list[Tuple[str, list[dict]]] = [
+NER_TEST_SET: list[tuple[str, list[dict]]] = [
     # ── TICKER examples ──
     ("What is AAPL stock price?", [{"text": "AAPL", "label": "TICKER"}]),
     ("Compare MSFT vs GOOGL", [{"text": "MSFT", "label": "TICKER"}, {"text": "GOOGL", "label": "TICKER"}]),
@@ -384,7 +384,7 @@ def evaluate_ner_per_type() -> dict:
 # ── RAG Evaluation ──────────────────────────────────────────────────────────
 # Gold-standard (query, expected_keywords) pairs for retrieval evaluation.
 # We check whether retrieved chunks contain expected keywords (content-based).
-RAG_GOLD_SET: list[Tuple[str, list[str]]] = [
+RAG_GOLD_SET: list[tuple[str, list[str]]] = [
     ("What is the P/E ratio?", ["price", "earnings", "P/E"]),
     ("How does dividend yield work?", ["dividend", "yield"]),
     ("Explain RSI indicator", ["RSI", "relative strength", "overbought"]),
@@ -534,17 +534,247 @@ def print_rag_report(rag_metrics: dict) -> None:
         print(f"    RR={q['reciprocal_rank']:.2f}  chunks={q['relevant_chunks_found']}  \"{q['query'][:50]}\"")
 
 
+def compute_calibration(
+    confidences: list[float], correct: list[bool], n_bins: int = 10
+) -> dict:
+    """Compute confidence calibration metrics.
+
+    Bins predictions by confidence and compares predicted vs actual accuracy.
+    A well-calibrated classifier should have accuracy ≈ confidence in each bin.
+
+    Args:
+        confidences: List of predicted confidence scores.
+        correct: List of booleans indicating whether each prediction was correct.
+        n_bins: Number of calibration bins.
+
+    Returns:
+        Dict with "bins" (per-bin stats), "ece" (Expected Calibration Error),
+        and "mce" (Maximum Calibration Error).
+    """
+    bins: list[dict] = []
+    for i in range(n_bins):
+        lo = i / n_bins
+        hi = (i + 1) / n_bins
+        mask = [(lo <= c < hi) or (i == n_bins - 1 and c == hi) for c in confidences]
+        bin_confs = [c for c, m in zip(confidences, mask) if m]
+        bin_correct = [cr for cr, m in zip(correct, mask) if m]
+
+        if bin_confs:
+            avg_conf = sum(bin_confs) / len(bin_confs)
+            avg_acc = sum(bin_correct) / len(bin_correct)
+        else:
+            avg_conf = (lo + hi) / 2
+            avg_acc = 0.0
+
+        bins.append({
+            "bin_range": f"{lo:.1f}-{hi:.1f}",
+            "count": len(bin_confs),
+            "avg_confidence": round(avg_conf, 4),
+            "avg_accuracy": round(avg_acc, 4),
+            "gap": round(abs(avg_acc - avg_conf), 4),
+        })
+
+    # Expected Calibration Error (ECE) — weighted average of bin gaps
+    total = len(confidences)
+    ece = sum(b["gap"] * b["count"] / total for b in bins if b["count"] > 0) if total > 0 else 0.0
+    mce = max((b["gap"] for b in bins if b["count"] > 0), default=0.0)
+
+    return {
+        "bins": bins,
+        "ece": round(ece, 4),
+        "mce": round(mce, 4),
+        "n_samples": total,
+    }
+
+
+def evaluate_calibration() -> dict:
+    """Evaluate ML classifier confidence calibration on the test set.
+
+    Returns:
+        Dict with calibration bins, ECE, MCE, and per-intent confidence stats.
+    """
+    try:
+        from intent_classifier import predict_intent
+    except Exception:
+        return {"available": False, "error": "ML classifier not available"}
+
+    confidences: list[float] = []
+    correct: list[bool] = []
+    per_intent: dict[str, list[float]] = defaultdict(list)
+
+    for text, true_label in INTENT_TEST_SET:
+        pred_label, conf = predict_intent(text)
+        confidences.append(conf)
+        correct.append(pred_label == true_label)
+        per_intent[true_label].append(conf)
+
+    calibration = compute_calibration(confidences, correct)
+
+    # Per-intent confidence distribution
+    intent_conf_stats: dict[str, dict] = {}
+    for intent, confs in sorted(per_intent.items()):
+        intent_conf_stats[intent] = {
+            "mean": round(sum(confs) / len(confs), 4),
+            "min": round(min(confs), 4),
+            "max": round(max(confs), 4),
+            "count": len(confs),
+        }
+
+    return {
+        "available": True,
+        "calibration": calibration,
+        "per_intent_confidence": intent_conf_stats,
+    }
+
+
+def bootstrap_confidence_interval(
+    y_true: list[str],
+    y_pred: list[str],
+    metric_fn: str = "accuracy",
+    n_bootstrap: int = 1000,
+    ci_level: float = 0.95,
+    seed: int = 42,
+) -> dict:
+    """Compute bootstrap confidence interval for a classification metric.
+
+    Args:
+        y_true: Ground-truth labels.
+        y_pred: Predicted labels.
+        metric_fn: Metric to compute ("accuracy", "macro_f1").
+        n_bootstrap: Number of bootstrap iterations.
+        ci_level: Confidence level (e.g., 0.95 for 95% CI).
+        seed: Random seed for reproducibility.
+
+    Returns:
+        Dict with "point_estimate", "ci_lower", "ci_upper", "ci_level".
+    """
+    rng = random.Random(seed)
+    n = len(y_true)
+
+    def _compute_metric(yt: list[str], yp: list[str]) -> float:
+        if metric_fn == "accuracy":
+            return sum(1 for t, p in zip(yt, yp) if t == p) / len(yt) if yt else 0.0
+        elif metric_fn == "macro_f1":
+            metrics = compute_classification_metrics(yt, yp)
+            return metrics["macro"]["f1"]
+        return 0.0
+
+    point_estimate = _compute_metric(y_true, y_pred)
+
+    bootstrap_scores: list[float] = []
+    for _ in range(n_bootstrap):
+        indices = [rng.randint(0, n - 1) for _ in range(n)]
+        yt_boot = [y_true[i] for i in indices]
+        yp_boot = [y_pred[i] for i in indices]
+        bootstrap_scores.append(_compute_metric(yt_boot, yp_boot))
+
+    bootstrap_scores.sort()
+    alpha = 1 - ci_level
+    lo_idx = int(alpha / 2 * n_bootstrap)
+    hi_idx = int((1 - alpha / 2) * n_bootstrap) - 1
+
+    return {
+        "point_estimate": round(point_estimate, 4),
+        "ci_lower": round(bootstrap_scores[lo_idx], 4),
+        "ci_upper": round(bootstrap_scores[hi_idx], 4),
+        "ci_level": ci_level,
+        "n_bootstrap": n_bootstrap,
+    }
+
+
+def evaluate_with_confidence_intervals() -> dict:
+    """Evaluate classifiers with bootstrap confidence intervals.
+
+    Returns:
+        Dict with CI for both ML and keyword classifier accuracy and macro-F1.
+    """
+    from nlp_pipeline import classify_intent as keyword_classify
+
+    texts = [t for t, _ in INTENT_TEST_SET]
+    y_true = [l for _, l in INTENT_TEST_SET]
+
+    results: dict = {}
+
+    # Keyword classifier
+    kw_preds = [keyword_classify(t) for t in texts]
+    results["keyword"] = {
+        "accuracy_ci": bootstrap_confidence_interval(y_true, kw_preds, "accuracy"),
+        "macro_f1_ci": bootstrap_confidence_interval(y_true, kw_preds, "macro_f1"),
+    }
+
+    # ML classifier
+    try:
+        from intent_classifier import predict_intent
+        ml_preds = [predict_intent(t)[0] for t in texts]
+        results["ml"] = {
+            "accuracy_ci": bootstrap_confidence_interval(y_true, ml_preds, "accuracy"),
+            "macro_f1_ci": bootstrap_confidence_interval(y_true, ml_preds, "macro_f1"),
+        }
+    except Exception:
+        results["ml"] = {"error": "ML classifier not available"}
+
+    return results
+
+
+def print_calibration_report(cal_results: dict) -> None:
+    """Pretty-print confidence calibration analysis."""
+    print(f"\n{'=' * 60}")
+    print(f"  Confidence Calibration Analysis")
+    print(f"{'=' * 60}")
+
+    if not cal_results.get("available", False):
+        print(f"  {cal_results.get('error', 'Not available')}")
+        return
+
+    cal = cal_results["calibration"]
+    print(f"\n  Expected Calibration Error (ECE): {cal['ece']:.2%}")
+    print(f"  Maximum Calibration Error (MCE):  {cal['mce']:.2%}")
+    print(f"  Samples: {cal['n_samples']}")
+
+    print(f"\n  {'Bin':<12} {'Count':>7} {'Avg Conf':>10} {'Avg Acc':>10} {'Gap':>8}")
+    print(f"  {'-' * 47}")
+    for b in cal["bins"]:
+        if b["count"] > 0:
+            print(f"  {b['bin_range']:<12} {b['count']:>7} {b['avg_confidence']:>9.1%} {b['avg_accuracy']:>9.1%} {b['gap']:>7.1%}")
+
+    print(f"\n  Per-Intent Confidence Distribution:")
+    print(f"  {'Intent':<18} {'Mean':>8} {'Min':>8} {'Max':>8} {'Count':>7}")
+    print(f"  {'-' * 49}")
+    for intent, stats in cal_results["per_intent_confidence"].items():
+        print(f"  {intent:<18} {stats['mean']:>7.1%} {stats['min']:>7.1%} {stats['max']:>7.1%} {stats['count']:>7}")
+
+
+def print_confidence_interval_report(ci_results: dict) -> None:
+    """Pretty-print bootstrap confidence intervals."""
+    print(f"\n{'=' * 60}")
+    print(f"  Bootstrap Confidence Intervals (95%)")
+    print(f"{'=' * 60}")
+
+    for name, data in ci_results.items():
+        if "error" in data:
+            print(f"\n  {name}: {data['error']}")
+            continue
+        print(f"\n  {name.upper()} Classifier:")
+        for metric_name, ci in data.items():
+            label = metric_name.replace("_ci", "").replace("_", " ").title()
+            print(f"    {label}: {ci['point_estimate']:.2%} [{ci['ci_lower']:.2%}, {ci['ci_upper']:.2%}]")
+
+
 def run_full_evaluation() -> dict:
     """Run all evaluations and return combined results."""
     intent_results = evaluate_intent_classifiers()
     ner_results = evaluate_ner()
     ner_per_type = evaluate_ner_per_type()
     rag_results = evaluate_rag()
+    calibration_results = evaluate_calibration()
+    ci_results = evaluate_with_confidence_intervals()
     return {
         "intent": intent_results,
         "ner": ner_results,
         "ner_per_type": ner_per_type,
         "rag": rag_results,
+        "calibration": calibration_results,
+        "confidence_intervals": ci_results,
     }
 
 
@@ -561,6 +791,8 @@ if __name__ == "__main__":
     print_ner_report(results["ner"])
     print_ner_per_type_report(results["ner_per_type"])
     print_rag_report(results["rag"])
+    print_calibration_report(results["calibration"])
+    print_confidence_interval_report(results["confidence_intervals"])
 
     # Summary comparison
     print(f"\n{'=' * 60}")

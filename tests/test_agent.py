@@ -76,9 +76,9 @@ class TestAgentConfiguration:
         from financial_agent import agent
         assert agent.markdown is True
 
-    def test_agent_show_tool_calls_enabled(self):
+    def test_agent_show_tool_calls_disabled(self):
         from financial_agent import agent
-        assert agent.show_tool_calls is True
+        assert agent.show_tool_calls is False
 
     def test_agent_history_responses_set(self):
         from financial_agent import agent
@@ -147,10 +147,10 @@ class TestCreateAgent:
         a = create_agent()
         assert a.markdown is True
 
-    def test_show_tool_calls_always_enabled(self):
+    def test_show_tool_calls_default(self):
         from financial_agent import create_agent
         a = create_agent()
-        assert a.show_tool_calls is True
+        assert a.show_tool_calls is False
 
     def test_env_var_api_key_used_when_no_explicit(self):
         """Factory falls back to GROQ_API_KEY env var."""
@@ -612,12 +612,14 @@ class TestResponsePackaging:
         from financial_agent import AGENT_INSTRUCTIONS
         joined = "\n".join(AGENT_INSTRUCTIONS)
         assert "create_stock_chart" in joined
-        assert "Do NOT use markdown image syntax" in joined
+        assert "Do not show file names" in joined
+        assert "Do not use markdown image syntax" in joined
 
     def test_instructions_contain_excel_directive(self):
         from financial_agent import AGENT_INSTRUCTIONS
         joined = "\n".join(AGENT_INSTRUCTIONS)
         assert "create_stock_excel_report" in joined
+        assert "Do not show file names" in joined
 
     def test_instructions_contain_disclaimer(self):
         from financial_agent import AGENT_INSTRUCTIONS
@@ -628,7 +630,7 @@ class TestResponsePackaging:
         """Agent must be instructed to never claim inability to create charts/sheets."""
         from financial_agent import AGENT_INSTRUCTIONS
         joined = "\n".join(AGENT_INSTRUCTIONS)
-        assert "NEVER say you cannot create" in joined
+        assert "Never say you cannot create charts or spreadsheets" in joined
 
     def test_instructions_require_dollar_sign_prices(self):
         from financial_agent import AGENT_INSTRUCTIONS
@@ -638,6 +640,8 @@ class TestResponsePackaging:
     def test_instructions_require_tables(self):
         from financial_agent import AGENT_INSTRUCTIONS
         joined = "\n".join(AGENT_INSTRUCTIONS)
+        assert "Use headings" in joined
+        assert "Key Data" in joined
         assert "tables" in joined.lower()
 
 

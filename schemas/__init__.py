@@ -36,6 +36,7 @@ from schemas.streaming import (
     StreamEventDone,
     StreamEventError,
     StreamEventNLPMeta,
+    StreamEventResearch,
     StreamEventType,
 )
 
@@ -46,6 +47,36 @@ from schemas.common import (
     SessionClearResponse,
     StatsResponse,
     ToolResponse,
+)
+
+from schemas.research import (
+    CompanySnapshotResponse,
+    ComparisonResponse,
+    ComparisonRow,
+    ExplainabilityItem,
+    ResearchMetric,
+    ResearchResponse,
+    ResearchSignal,
+    ResearchSource,
+    SnapshotHeadline,
+    SnapshotPoint,
+)
+
+from schemas.sessions import (
+    SessionDetail,
+    SessionListResponse,
+    SessionMessage,
+    SessionRenameRequest,
+    SessionSummary,
+)
+
+from schemas.alerts import (
+    AlertCheckItem,
+    AlertCheckResponse,
+    AlertCreateRequest,
+    AlertListResponse,
+    AlertResponse,
+    AlertUpdateRequest,
 )
 
 # ── watchlist.py ──────────────────────────────────────────────────────
@@ -76,6 +107,7 @@ __all__ = [
     "StreamEventDone",
     "StreamEventError",
     "StreamEventNLPMeta",
+    "StreamEventResearch",
     "StreamEventType",
     # common
     "ErrorResponse",
@@ -88,4 +120,28 @@ __all__ = [
     "WatchlistItem",
     "WatchlistRemoveRequest",
     "WatchlistResponse",
+    # research
+    "CompanySnapshotResponse",
+    "ComparisonResponse",
+    "ComparisonRow",
+    "ExplainabilityItem",
+    "ResearchMetric",
+    "ResearchResponse",
+    "ResearchSignal",
+    "ResearchSource",
+    "SnapshotHeadline",
+    "SnapshotPoint",
+    # sessions
+    "SessionDetail",
+    "SessionListResponse",
+    "SessionMessage",
+    "SessionRenameRequest",
+    "SessionSummary",
+    # alerts
+    "AlertCheckItem",
+    "AlertCheckResponse",
+    "AlertCreateRequest",
+    "AlertListResponse",
+    "AlertResponse",
+    "AlertUpdateRequest",
 ]

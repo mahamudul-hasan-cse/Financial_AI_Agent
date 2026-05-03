@@ -56,7 +56,7 @@ def _get_st_model() -> "SentenceTransformer | None":
     global _st_model
     if _st_model is None and DENSE_AVAILABLE:
         try:
-            _st_model = SentenceTransformer("all-MiniLM-L6-v2")
+            _st_model = SentenceTransformer("all-mpnet-base-v2")
         except Exception:
             pass
     return _st_model
@@ -282,13 +282,15 @@ class RAGRetriever:
                     cache_file = self._CACHE_DIR / f"kb_embeddings_{self._content_hash()}.npy"
                     if cache_file.exists():
                         self._dense_index = np.load(str(cache_file))
-                        if self._dense_index.shape[0] == len(self.documents):
+                        expected_dim = model.get_sentence_embedding_dimension()
+                        if (self._dense_index.shape[0] == len(self.documents)
+                                and self._dense_index.shape[1] == expected_dim):
                             logger.info(
                                 "Loaded cached embeddings for %d chunks from %s",
                                 len(self.documents), cache_file.name,
                             )
                             return
-                        # Shape mismatch — recompute
+                        # Shape mismatch (document count or embedding dim) — recompute
                         self._dense_index = None
 
                     # Compute fresh embeddings

@@ -1,17 +1,71 @@
+# =============================================================================
+# Financial AI Agent — Docker Compose
+# =============================================================================
+#
+# Default (Groq cloud LLM):
+#   docker compose up --build
+#
+# With local Ollama LLM:
+#   docker compose --profile ollama up --build
+#   # Then pull the model into the Ollama container once:
+#   docker exec financial-ai-ollama ollama pull qwen2.5:3b
+#
+# Access the app at: http://localhost:8001
+# =============================================================================
+
 services:
+
+  # ── Main application ────────────────────────────────────────────────────────
   app:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: financial-ai-agent:latest
+    container_name: financial-ai-agent
     ports:
-      - "8000:8000"
+      - "8001:8001"
     env_file:
       - .env
     environment:
-      - CORS_ORIGINS=http://localhost:8000
+      # Allow requests from the browser's origin
+      CORS_ORIGINS: "http://localhost:8001"
+      # When LLM_PROVIDER=ollama, point to the compose service, not localhost
+      OLLAMA_HOST: "http://ollama:11434"
     volumes:
+      # Persist generated charts and Excel reports across container restarts
       - ./outputs:/app/outputs
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8000/api/health || exit 1"]
+      test: ["CMD", "curl", "-fs", "http://localhost:8001/api/health"]
       interval: 30s
       timeout: 10s
+      start_period: 30s
       retries: 3
+
+  # ── Ollama local LLM (optional) ─────────────────────────────────────────────
+  # Activate with: docker compose --profile ollama up
+  # After first start, pull the model once:
+  #   docker exec financial-ai-ollama ollama pull qwen2.5:3b
+  # Then set LLM_PROVIDER=ollama in your .env
+  ollama:
+    image: ollama/ollama:latest
+    container_name: financial-ai-ollama
+    profiles:
+      - ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      # Named volume keeps downloaded models across container restarts
+      - ollama_models:/root/.ollama
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://localhost:11434/api/tags"]
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 5
+
+volumes:
+  # Stores Ollama model weights (populated on first pull, persisted forever)
+  ollama_models:
+    name: financial-ai-ollama-models

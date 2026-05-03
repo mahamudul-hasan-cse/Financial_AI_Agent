@@ -17,7 +17,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
@@ -36,7 +35,7 @@ jobs:
           pip install -r requirements.txt
           python -m spacy download en_core_web_sm
 
-      - name: Run tests
+      - name: Run tests with coverage
         env:
           GROQ_API_KEY: "test-key-for-ci"
         run: python -m pytest tests/ -v --tb=short -q
@@ -88,6 +87,10 @@ jobs:
       - name: Lint
         working-directory: frontend
         run: npm run lint
+
+      - name: Test
+        working-directory: frontend
+        run: npm test
 
       - name: Build
         working-directory: frontend

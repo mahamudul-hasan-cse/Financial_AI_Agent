@@ -20,6 +20,7 @@ class StreamEventType(str, Enum):
     nlp_meta = "nlp_meta"
     chunk = "chunk"
     error = "error"
+    research = "research"
     done = "done"
 
 
@@ -44,6 +45,13 @@ class StreamEventError(BaseModel):
     data: str
 
 
+class StreamEventResearch(BaseModel):
+    """SSE event emitted after the full answer is structured for the UI."""
+
+    event: Literal[StreamEventType.research] = StreamEventType.research
+    data: dict
+
+
 class StreamEventDone(BaseModel):
     """Terminal SSE event — signals end of stream."""
 
@@ -52,4 +60,10 @@ class StreamEventDone(BaseModel):
 
 
 # Discriminated union of all SSE event types.
-StreamEvent = StreamEventNLPMeta | StreamEventChunk | StreamEventError | StreamEventDone
+StreamEvent = (
+    StreamEventNLPMeta
+    | StreamEventChunk
+    | StreamEventError
+    | StreamEventResearch
+    | StreamEventDone
+)

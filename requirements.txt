@@ -25,4 +25,5 @@ numpy
 
 # Testing
 pytest
+pytest-cov
 httpx

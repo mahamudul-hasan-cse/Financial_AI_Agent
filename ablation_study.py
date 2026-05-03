@@ -23,6 +23,7 @@ Run directly: python ablation_study.py
 
 from __future__ import annotations
 
+import random
 import sys
 from typing import Callable
 
@@ -85,6 +86,44 @@ def _rag_quality() -> float:
     return round(sum(scores) / len(scores), 4) if scores else 0.0
 
 
+def _bootstrap_metric(
+    metric_fn: Callable[[], float],
+    classify_fn: Callable[[str], str],
+    n_bootstrap: int = 500,
+    seed: int = 42,
+) -> dict:
+    """Compute bootstrap mean and std for an intent accuracy metric.
+
+    Returns dict with "mean", "std", "ci_lower", "ci_upper".
+    """
+    from evaluation import INTENT_TEST_SET
+
+    rng = random.Random(seed)
+    test_items = list(INTENT_TEST_SET)
+    n = len(test_items)
+
+    scores: list[float] = []
+    for _ in range(n_bootstrap):
+        sample = [test_items[rng.randint(0, n - 1)] for _ in range(n)]
+        correct = sum(1 for text, label in sample if classify_fn(text) == label)
+        scores.append(correct / n if n > 0 else 0.0)
+
+    scores.sort()
+    mean = sum(scores) / len(scores)
+    variance = sum((s - mean) ** 2 for s in scores) / len(scores)
+    std = variance ** 0.5
+
+    lo_idx = int(0.025 * n_bootstrap)
+    hi_idx = int(0.975 * n_bootstrap) - 1
+
+    return {
+        "mean": round(mean, 4),
+        "std": round(std, 4),
+        "ci_lower": round(scores[lo_idx], 4),
+        "ci_upper": round(scores[hi_idx], 4),
+    }
+
+
 def run_ablation_study() -> list[dict]:
     """Run all ablation conditions and return results."""
     import nlp_pipeline
@@ -105,9 +144,12 @@ def run_ablation_study() -> list[dict]:
         full_classify = keyword_classify
         ml_available = False
 
+    full_acc = _intent_accuracy(full_classify)
+    full_bootstrap = _bootstrap_metric(lambda: full_acc, full_classify)
     results.append({
         "condition": "Full pipeline",
-        "intent_accuracy": _intent_accuracy(full_classify),
+        "intent_accuracy": full_acc,
+        "intent_accuracy_ci": full_bootstrap,
         "entity_recall": _entity_recall(extract_entities),
         "sentiment_coverage": _sentiment_coverage(analyze_sentiment),
         "rag_quality": _rag_quality(),
@@ -118,6 +160,7 @@ def run_ablation_study() -> list[dict]:
     results.append({
         "condition": "No NER",
         "intent_accuracy": _intent_accuracy(full_classify),
+        "intent_accuracy_ci": full_bootstrap,
         "entity_recall": _entity_recall(no_ner_fn),
         "sentiment_coverage": _sentiment_coverage(analyze_sentiment),
         "rag_quality": _rag_quality(),
@@ -125,9 +168,12 @@ def run_ablation_study() -> list[dict]:
 
     # 3. No intent — always return "general"
     no_intent_fn = lambda text: "general"
+    no_intent_acc = _intent_accuracy(no_intent_fn)
+    no_intent_bootstrap = _bootstrap_metric(lambda: no_intent_acc, no_intent_fn)
     results.append({
         "condition": "No intent classifier",
-        "intent_accuracy": _intent_accuracy(no_intent_fn),
+        "intent_accuracy": no_intent_acc,
+        "intent_accuracy_ci": no_intent_bootstrap,
         "entity_recall": _entity_recall(extract_entities),
         "sentiment_coverage": _sentiment_coverage(analyze_sentiment),
         "rag_quality": _rag_quality(),
@@ -138,6 +184,7 @@ def run_ablation_study() -> list[dict]:
     results.append({
         "condition": "No sentiment",
         "intent_accuracy": _intent_accuracy(full_classify),
+        "intent_accuracy_ci": full_bootstrap,
         "entity_recall": _entity_recall(extract_entities),
         "sentiment_coverage": _sentiment_coverage(no_sentiment_fn),
         "rag_quality": _rag_quality(),
@@ -147,6 +194,7 @@ def run_ablation_study() -> list[dict]:
     results.append({
         "condition": "No RAG",
         "intent_accuracy": _intent_accuracy(full_classify),
+        "intent_accuracy_ci": full_bootstrap,
         "entity_recall": _entity_recall(extract_entities),
         "sentiment_coverage": _sentiment_coverage(analyze_sentiment),
         "rag_quality": 0.0,
@@ -154,9 +202,12 @@ def run_ablation_study() -> list[dict]:
 
     # 6. Keyword-only intent (no ML)
     if ml_available:
+        kw_acc = _intent_accuracy(keyword_classify)
+        kw_bootstrap = _bootstrap_metric(lambda: kw_acc, keyword_classify)
         results.append({
             "condition": "Keyword-only intent",
-            "intent_accuracy": _intent_accuracy(keyword_classify),
+            "intent_accuracy": kw_acc,
+            "intent_accuracy_ci": kw_bootstrap,
             "entity_recall": _entity_recall(extract_entities),
             "sentiment_coverage": _sentiment_coverage(analyze_sentiment),
             "rag_quality": _rag_quality(),
@@ -172,8 +223,8 @@ def print_ablation_table(results: list[dict]) -> None:
     print(f"  Financial AI Agent — CSE495B")
     print(f"{'=' * 80}")
 
-    headers = ["Condition", "Intent Acc", "Entity Rec", "Sent Cov", "RAG Qual"]
-    col_widths = [24, 12, 12, 12, 12]
+    headers = ["Condition", "Intent Acc", "95% CI", "Entity Rec", "Sent Cov", "RAG Qual"]
+    col_widths = [24, 12, 18, 12, 12, 12]
 
     # Header
     header_line = "  " + "".join(h.ljust(w) for h, w in zip(headers, col_widths))
@@ -188,6 +239,9 @@ def print_ablation_table(results: list[dict]) -> None:
         entity_str = f"{r['entity_recall']:.1%}"
         sent_str = f"{r['sentiment_coverage']:.1%}"
         rag_str = f"{r['rag_quality']:.3f}"
+
+        ci = r.get("intent_accuracy_ci", {})
+        ci_str = f"[{ci.get('ci_lower', 0):.1%}, {ci.get('ci_upper', 0):.1%}]" if ci else "—"
 
         if full and r["condition"] != "Full pipeline":
             intent_delta = r["intent_accuracy"] - full["intent_accuracy"]
@@ -206,9 +260,10 @@ def print_ablation_table(results: list[dict]) -> None:
 
         line = "  " + r["condition"].ljust(col_widths[0])
         line += intent_str.ljust(col_widths[1])
-        line += entity_str.ljust(col_widths[2])
-        line += sent_str.ljust(col_widths[3])
-        line += rag_str.ljust(col_widths[4])
+        line += ci_str.ljust(col_widths[2])
+        line += entity_str.ljust(col_widths[3])
+        line += sent_str.ljust(col_widths[4])
+        line += rag_str.ljust(col_widths[5])
         print(line)
 
     print()
