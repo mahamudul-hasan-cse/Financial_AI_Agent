@@ -24,6 +24,10 @@ dotenv.load_dotenv = lambda *args, **kwargs: False  # before config is imported
 _TEST_DB_DIR = tempfile.mkdtemp(prefix="financial-agent-tests-")
 os.environ["DATABASE_PATH"] = os.path.join(_TEST_DB_DIR, "test.db")
 os.environ.pop("SQLITE_PATH", None)
+os.environ.pop("DATABASE_URL", None)
+# Opt-in: run the whole suite on Postgres (TEST_BACKEND=postgres + TEST_DATABASE_URL).
+if os.getenv("TEST_BACKEND") == "postgres" and os.getenv("TEST_DATABASE_URL"):
+    os.environ["DATABASE_URL"] = os.environ["TEST_DATABASE_URL"]
 os.environ.pop("GROQ_API_KEY", None)
 os.environ.pop("GROQ_MODEL", None)
 for _name in (

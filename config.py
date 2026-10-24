@@ -115,6 +115,7 @@ class Settings:
     app_dir: Path
     outputs_dir: Path
     sqlite_path: Path
+    database_url: str | None
     api_key: str | None
     cors_origins: list[str]
     agent_timeout: int
@@ -163,6 +164,8 @@ def load_settings() -> Settings:
         app_dir=APP_DIR,
         outputs_dir=outputs_dir,
         sqlite_path=Path(db_path),
+        # Postgres (e.g. Neon pooled URL); when unset, SQLite at DATABASE_PATH is used.
+        database_url=os.getenv("DATABASE_URL") or None,
         api_key=os.getenv("API_KEY") or None,
         cors_origins=cors_origins,
         agent_timeout=int(_env("AGENT_TIMEOUT", "120")),

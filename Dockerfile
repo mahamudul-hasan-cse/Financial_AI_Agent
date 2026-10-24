@@ -116,6 +116,7 @@ COPY api.py \
      intent_classifier.py \
      cache.py \
      config.py \
+     db_schema.py \
      market_service.py \
      persistence.py \
      research_service.py \

@@ -31,8 +31,13 @@ class TestDatabaseIsolation:
     def test_reset_refuses_default_database(self, monkeypatch):
         import persistence
 
-        monkeypatch.setattr(persistence, "DB_PATH", persistence._DEFAULT_DB_PATH)
-        with pytest.raises(RuntimeError, match="refused"):
+        if persistence.using_postgres():
+            monkeypatch.setattr(persistence, "DATABASE_URL", "postgresql://prod/db")
+            match = "TEST_DATABASE_URL"
+        else:
+            monkeypatch.setattr(persistence, "DB_PATH", persistence._DEFAULT_DB_PATH)
+            match = "refused"
+        with pytest.raises(RuntimeError, match=match):
             persistence.reset_for_tests()
 
     def test_groq_key_not_required_for_import(self):

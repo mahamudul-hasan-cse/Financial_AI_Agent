@@ -24,6 +24,9 @@ uvicorn==0.54.0
 pydantic==2.14.1
 python-dotenv==1.2.4
 
+# PostgreSQL (Neon) persistence; SQLite is used when DATABASE_URL is unset
+psycopg[binary,pool]==3.3.6
+
 # Market data, search, outputs
 yfinance==1.7.0
 ddgs==9.16.1
