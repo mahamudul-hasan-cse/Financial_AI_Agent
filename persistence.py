@@ -1,4 +1,9 @@
-"""SQLite persistence layer for sessions, watchlists, and alerts."""
+"""SQLite persistence layer for sessions, watchlists, and alerts.
+
+The database file is configured via ``DATABASE_PATH`` (see ``config.py``).
+Every session row records the anonymous ``client_id`` that created it so the
+API can restrict listing/reading/modifying to the owning browser.
+"""
 
 from __future__ import annotations
 
@@ -9,14 +14,17 @@ import time
 from pathlib import Path
 from typing import Any
 
-from config import settings
+from config import APP_DIR, settings
 
 _db_lock = threading.Lock()
 
+DB_PATH: Path = settings.sqlite_path
+_DEFAULT_DB_PATH: Path = APP_DIR / "data" / "financial_agent.db"
+
 
 def _connect() -> sqlite3.Connection:
-    settings.sqlite_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(settings.sqlite_path, check_same_thread=False)
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -32,6 +40,7 @@ def init_db() -> None:
             """
             CREATE TABLE IF NOT EXISTS sessions (
                 session_id TEXT PRIMARY KEY,
+                client_id TEXT,
                 title TEXT NOT NULL DEFAULT 'New research',
                 created_at REAL NOT NULL,
                 updated_at REAL NOT NULL,
@@ -78,14 +87,28 @@ def init_db() -> None:
             ON alerts (session_id);
             """
         )
+        # Migration: databases created before client ownership existed.
+        columns = {row["name"] for row in _conn.execute("PRAGMA table_info(sessions)")}
+        if "client_id" not in columns:
+            _conn.execute("ALTER TABLE sessions ADD COLUMN client_id TEXT")
+        _conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_client ON sessions (client_id)")
 
 
 init_db()
 
 
 def reset_for_tests() -> None:
-    """Delete persisted rows while keeping the schema intact."""
+    """Delete persisted rows while keeping the schema intact.
 
+    Refuses to run against the default application database so a test run
+    can never wipe real data (tests set ``DATABASE_PATH`` to a temp file).
+    """
+
+    if DB_PATH.resolve() == _DEFAULT_DB_PATH.resolve():
+        raise RuntimeError(
+            "reset_for_tests() refused to wipe the default database "
+            f"({DB_PATH}); set DATABASE_PATH to a temporary file."
+        )
     with _db_lock, _conn:
         _conn.execute("DELETE FROM alerts")
         _conn.execute("DELETE FROM watchlist")
@@ -101,8 +124,17 @@ def _session_title_from_messages(messages: list[dict[str, Any]]) -> str:
     return "New research"
 
 
-def upsert_session(session_id: str, *, title: str | None = None, touch: bool = True) -> None:
-    """Ensure a session exists and optionally refresh its timestamps."""
+def upsert_session(
+    session_id: str,
+    *,
+    client_id: str | None = None,
+    title: str | None = None,
+    touch: bool = True,
+) -> None:
+    """Ensure a session exists and optionally refresh its timestamps.
+
+    ``client_id`` is only recorded when the session row is created.
+    """
 
     now = time.time()
     with _db_lock, _conn:
@@ -113,10 +145,10 @@ def upsert_session(session_id: str, *, title: str | None = None, touch: bool = T
         if row is None:
             _conn.execute(
                 """
-                INSERT INTO sessions (session_id, title, created_at, updated_at, last_active)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO sessions (session_id, client_id, title, created_at, updated_at, last_active)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (session_id, title or "New research", now, now, now),
+                (session_id, client_id, title or "New research", now, now, now),
             )
         elif touch or title is not None:
             _conn.execute(
@@ -131,28 +163,56 @@ def upsert_session(session_id: str, *, title: str | None = None, touch: bool = T
             )
 
 
-def list_sessions() -> list[dict[str, Any]]:
-    """Return saved sessions ordered by activity."""
+_SESSION_SUMMARY_SQL = """
+    SELECT s.session_id, s.title, s.updated_at,
+           COALESCE((
+               SELECT SUBSTR(m.content, 1, 140)
+               FROM messages m
+               WHERE m.session_id = s.session_id AND m.role = 'user'
+               ORDER BY m.timestamp DESC, m.id DESC
+               LIMIT 1
+           ), '') AS preview,
+           (SELECT COUNT(*) FROM messages m WHERE m.session_id = s.session_id) AS message_count
+    FROM sessions s
+"""
+
+
+def list_sessions(client_id: str) -> list[dict[str, Any]]:
+    """Return the sessions owned by *client_id*, most recently updated first.
+
+    The preview is the latest user message in each session.
+    """
 
     with _db_lock:
         rows = _conn.execute(
-            """
-            SELECT s.session_id, s.title, s.updated_at,
-                   COALESCE(m.preview, '') AS preview,
-                   COALESCE(m.message_count, 0) AS message_count
-            FROM sessions s
-            LEFT JOIN (
-                SELECT session_id,
-                       MAX(timestamp) AS max_ts,
-                       SUBSTR(MAX(CASE WHEN role = 'user' THEN content ELSE '' END), 1, 140) AS preview,
-                       COUNT(*) AS message_count
-                FROM messages
-                GROUP BY session_id
-            ) m ON m.session_id = s.session_id
-            ORDER BY s.updated_at DESC
-            """
+            _SESSION_SUMMARY_SQL + " WHERE s.client_id = ? ORDER BY s.updated_at DESC",
+            (client_id,),
         ).fetchall()
     return [dict(row) for row in rows]
+
+
+def get_session_summary(session_id: str) -> dict[str, Any] | None:
+    """Return the sidebar summary row for one session."""
+
+    with _db_lock:
+        row = _conn.execute(
+            _SESSION_SUMMARY_SQL + " WHERE s.session_id = ?",
+            (session_id,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def get_session_owner(session_id: str) -> tuple[bool, str | None]:
+    """Return ``(exists, client_id)`` for a session."""
+
+    with _db_lock:
+        row = _conn.execute(
+            "SELECT client_id FROM sessions WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()
+    if row is None:
+        return False, None
+    return True, row["client_id"]
 
 
 def get_session(session_id: str) -> dict[str, Any] | None:
@@ -160,7 +220,7 @@ def get_session(session_id: str) -> dict[str, Any] | None:
 
     with _db_lock:
         session_row = _conn.execute(
-            "SELECT session_id, title, updated_at FROM sessions WHERE session_id = ?",
+            "SELECT session_id, client_id, title, updated_at FROM sessions WHERE session_id = ?",
             (session_id,),
         ).fetchone()
         if session_row is None:
@@ -271,7 +331,6 @@ def delete_session(session_id: str) -> None:
 def list_watchlist(session_id: str) -> list[str]:
     """Return watchlist symbols for a session."""
 
-    upsert_session(session_id)
     with _db_lock:
         rows = _conn.execute(
             "SELECT symbol FROM watchlist WHERE session_id = ? ORDER BY symbol ASC",
@@ -307,7 +366,6 @@ def remove_watchlist_symbol(session_id: str, symbol: str) -> None:
 def list_alerts(session_id: str) -> list[dict[str, Any]]:
     """Return all alerts for a session."""
 
-    upsert_session(session_id)
     with _db_lock:
         rows = _conn.execute(
             """
@@ -374,8 +432,8 @@ def get_alert(alert_id: int) -> dict[str, Any]:
 def update_alert(alert_id: int, *, enabled: bool | None = None, label: str | None = None) -> dict[str, Any]:
     """Update alert fields and return the updated row."""
 
+    current = get_alert(alert_id)  # acquires the (non-reentrant) lock itself
     with _db_lock, _conn:
-        current = get_alert(alert_id)
         _conn.execute(
             """
             UPDATE alerts
