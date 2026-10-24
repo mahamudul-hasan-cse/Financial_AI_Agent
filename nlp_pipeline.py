@@ -2,8 +2,8 @@
 
 Provides three NLP capabilities that run before the LLM agent on every query:
 
-1. Named Entity Recognition (NER) — spaCy en_core_web_sm identifies organisations,
-   products, and people; a lookup table maps known company names to ticker symbols.
+1. Named Entity Recognition (NER) — spaCy (``SPACY_MODEL``, default en_core_web_sm)
+   identifies organisations, products, and people; a lookup table maps known company names to ticker symbols.
    Bare TICKER patterns (ALL_CAPS 1-5 chars) are also detected via regex.
    Financial-specific regex patterns detect FIN_METRIC, DATE_REF, and MONEY entities.
 
@@ -23,13 +23,10 @@ import re
 from typing import TypedDict
 
 # ── spaCy NER ────────────────────────────────────────────────────────────────
-try:
-    import spacy
-    _nlp = spacy.load("en_core_web_md")
-    SPACY_AVAILABLE = True
-except Exception:
-    SPACY_AVAILABLE = False
-    _nlp = None
+from backend.app.nlp_models import load_spacy_model
+
+_nlp = load_spacy_model()
+SPACY_AVAILABLE = _nlp is not None
 
 # ── VADER Sentiment ──────────────────────────────────────────────────────────
 try:

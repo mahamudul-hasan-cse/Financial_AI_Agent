@@ -7,7 +7,8 @@ Pipeline:
   1. Query expansion: user query is expanded with financial synonyms for
      broader recall.
   2. Documents are chunked and encoded into dense vector embeddings using
-     sentence-transformers (all-MiniLM-L6-v2 — ~90 MB, auto-downloaded once).
+     sentence-transformers (``EMBEDDING_MODEL`` env var, default
+     all-MiniLM-L6-v2 — ~90 MB, auto-downloaded once).
   3. At query time, the query is encoded with the same model.
   4. Cosine similarity ranks chunks; the top candidates are retrieved.
   5. Re-ranking: a lightweight keyword-overlap scorer re-ranks the initial
@@ -31,14 +32,14 @@ import hashlib
 import logging
 import re
 from collections import Counter
-from pathlib import Path
 from typing import NamedTuple
 
 import numpy as np
+from agno.tools import Toolkit
+
+from config import settings
 
 logger = logging.getLogger("rag_tools")
-
-from agno.tools import Toolkit
 
 # ── Embedding backends ────────────────────────────────────────────────────────
 try:
@@ -47,19 +48,35 @@ try:
 except ImportError:
     DENSE_AVAILABLE = False
 
-# Lazy-loaded on first use — avoids 3-5s startup delay from loading 90MB model
+# Lazy-loaded on first use — avoids startup delay and RAM until RAG is needed.
+# The model is configurable via EMBEDDING_MODEL (default: all-MiniLM-L6-v2,
+# 384-dim, ~90 MB). all-mpnet-base-v2 gives slightly better recall at ~5x RAM.
+EMBEDDING_MODEL_NAME: str = settings.embedding_model
 _st_model: "SentenceTransformer | None" = None
+_st_model_failed = False
 
 
 def _get_st_model() -> "SentenceTransformer | None":
     """Return the sentence-transformers model, loading it on first call."""
-    global _st_model
-    if _st_model is None and DENSE_AVAILABLE:
+    global _st_model, _st_model_failed
+    if _st_model is None and DENSE_AVAILABLE and not _st_model_failed:
         try:
-            _st_model = SentenceTransformer("all-mpnet-base-v2")
+            _st_model = SentenceTransformer(EMBEDDING_MODEL_NAME)
         except Exception:
-            pass
+            _st_model_failed = True
+            logger.warning(
+                "Could not load embedding model %s — using TF-IDF retrieval",
+                EMBEDDING_MODEL_NAME,
+                exc_info=True,
+            )
     return _st_model
+
+
+def _embedding_dim(model: "SentenceTransformer") -> int | None:
+    getter = getattr(model, "get_embedding_dimension", None) or getattr(
+        model, "get_sentence_embedding_dimension"
+    )
+    return getter()
 
 try:
     from sklearn.feature_extraction.text import TfidfVectorizer
@@ -247,7 +264,7 @@ class RAGRetriever:
     """
 
     # Directory for cached embeddings
-    _CACHE_DIR = Path(__file__).parent.parent / "outputs" / ".embedding_cache"
+    _CACHE_DIR = settings.outputs_dir / ".embedding_cache"
 
     def __init__(self, documents: list[dict[str, str]] | list[str]) -> None:
         # Support both new dict format and legacy plain string list
@@ -264,7 +281,7 @@ class RAGRetriever:
 
     def _content_hash(self) -> str:
         """Compute a hash of all document texts for cache invalidation."""
-        combined = "\n".join(self.documents)
+        combined = EMBEDDING_MODEL_NAME + "\n" + "\n".join(self.documents)
         return hashlib.md5(combined.encode()).hexdigest()[:12]
 
     def _build_index(self) -> None:
@@ -282,7 +299,7 @@ class RAGRetriever:
                     cache_file = self._CACHE_DIR / f"kb_embeddings_{self._content_hash()}.npy"
                     if cache_file.exists():
                         self._dense_index = np.load(str(cache_file))
-                        expected_dim = model.get_sentence_embedding_dimension()
+                        expected_dim = _embedding_dim(model)
                         if (self._dense_index.shape[0] == len(self.documents)
                                 and self._dense_index.shape[1] == expected_dim):
                             logger.info(
@@ -393,8 +410,24 @@ class RAGRetriever:
         ]
 
 
-# Singleton retriever built from the built-in knowledge base
-_retriever = RAGRetriever(_KNOWLEDGE_BASE)
+# Singleton retriever built from the built-in knowledge base (lazily, so the
+# embedding model is only loaded when RAG is first used).
+_default_retriever: RAGRetriever | None = None
+
+
+def get_default_retriever() -> RAGRetriever:
+    """Return the shared retriever over the built-in knowledge base."""
+    global _default_retriever
+    if _default_retriever is None:
+        _default_retriever = RAGRetriever(_KNOWLEDGE_BASE)
+    return _default_retriever
+
+
+def __getattr__(name: str):
+    # Backward compatibility: ``from tools.rag_tools import _retriever``.
+    if name == "_retriever":
+        return get_default_retriever()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 class RAGTools(Toolkit):
@@ -402,8 +435,12 @@ class RAGTools(Toolkit):
 
     def __init__(self, retriever: RAGRetriever | None = None):
         super().__init__(name="rag_tools")
-        self._retriever = retriever or _retriever
+        self._retriever_override = retriever
         self.register(self.retrieve_financial_context)
+
+    @property
+    def _retriever(self) -> RAGRetriever:
+        return self._retriever_override or get_default_retriever()
 
     def retrieve_financial_context(self, query: str, top_k: int = 3) -> str:
         """Retrieve relevant financial knowledge chunks for a user query.

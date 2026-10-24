@@ -23,13 +23,15 @@ import string
 logger = logging.getLogger(__name__)
 
 # ── Text Preprocessing ──────────────────────────────────────────────────────
-try:
-    import spacy as _spacy_mod
-    _lemmatizer_nlp = _spacy_mod.load("en_core_web_sm", disable=["ner", "parser"])
-    _SPACY_LEMMA_AVAILABLE = True
-except Exception:
-    _SPACY_LEMMA_AVAILABLE = False
-    _lemmatizer_nlp = None
+# Shares the spaCy model loaded by the NLP pipeline (SPACY_MODEL env var).
+from backend.app.nlp_models import load_spacy_model
+
+_lemmatizer_nlp = load_spacy_model()
+_SPACY_LEMMA_AVAILABLE = _lemmatizer_nlp is not None
+# Lemmatisation only needs the tagger/lemmatizer; skip the expensive components.
+_LEMMA_DISABLE = [
+    name for name in ("ner", "parser") if _lemmatizer_nlp is not None and name in _lemmatizer_nlp.pipe_names
+]
 
 # Punctuation to remove (keep $ since it's meaningful in finance)
 _PUNCT_TO_REMOVE = string.punctuation.replace("$", "")
@@ -57,7 +59,8 @@ def preprocess_text(text: str) -> str:
 
     # Lemmatize with spaCy if available
     if _SPACY_LEMMA_AVAILABLE and _lemmatizer_nlp is not None:
-        doc = _lemmatizer_nlp(text)
+        with _lemmatizer_nlp.select_pipes(disable=_LEMMA_DISABLE):
+            doc = _lemmatizer_nlp(text)
         text = " ".join(token.lemma_ for token in doc)
 
     return text.strip()

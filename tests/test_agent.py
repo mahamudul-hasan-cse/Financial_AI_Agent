@@ -19,6 +19,13 @@ from agno.agent import Agent
 from agno.tools import Toolkit
 
 
+@pytest.fixture(autouse=True)
+def _fake_groq_env(monkeypatch):
+    """Building a Groq agent needs *some* key; no LLM call is ever made."""
+    monkeypatch.setenv("GROQ_API_KEY", "test-key-for-agent-tests")
+    monkeypatch.setenv("LLM_PROVIDER", "groq")
+
+
 # ── Module-level singleton ────────────────────────────────────────────
 
 class TestAgentConfiguration:
@@ -80,9 +87,10 @@ class TestAgentConfiguration:
         from financial_agent import agent
         assert agent.show_tool_calls is False
 
-    def test_agent_history_responses_set(self):
+    def test_agent_builtin_history_disabled(self):
+        """History is injected per session by the API, never via agno's shared memory."""
         from financial_agent import agent
-        assert agent.num_history_responses == 3
+        assert agent.add_history_to_messages is False
 
 
 # ── create_agent() factory ───────────────────────────────────────────
@@ -114,8 +122,7 @@ class TestCreateAgent:
 
     def test_no_api_key_raises_runtime_error(self):
         from financial_agent import create_agent
-        with patch.dict("os.environ", {}, clear=True), \
-             patch("backend.app.agent.financial_agent.os.getenv", return_value=None):
+        with patch.dict("os.environ", {"GROQ_API_KEY": ""}):
             with pytest.raises(RuntimeError, match="GROQ_API_KEY"):
                 create_agent(api_key=None)
 
@@ -155,13 +162,13 @@ class TestCreateAgent:
     def test_env_var_api_key_used_when_no_explicit(self):
         """Factory falls back to GROQ_API_KEY env var."""
         from financial_agent import create_agent
-        with patch("backend.app.agent.financial_agent.os.getenv", return_value="env-key-456"):
+        with patch.dict("os.environ", {"GROQ_API_KEY": "env-key-456"}):
             a = create_agent(api_key=None)
             assert a.model.api_key == "env-key-456"
 
     def test_explicit_key_takes_precedence_over_env(self):
         from financial_agent import create_agent
-        with patch("backend.app.agent.financial_agent.os.getenv", return_value="env-key"):
+        with patch.dict("os.environ", {"GROQ_API_KEY": "env-key"}):
             a = create_agent(api_key="explicit-key")
             assert a.model.api_key == "explicit-key"
 
@@ -174,10 +181,105 @@ class TestCreateAgent:
             mock_bt.assert_called_once()
             assert len(a.tools) == 1
 
-    def test_num_history_responses_set_by_factory(self):
+    def test_builtin_history_disabled_by_factory(self):
         from financial_agent import create_agent
         a = create_agent()
-        assert a.num_history_responses == 3
+        assert a.add_history_to_messages is False
+
+    def test_session_id_passed_to_agent(self):
+        from financial_agent import create_agent
+        a = create_agent(tools=[], session_id="sess-123")
+        assert a.session_id == "sess-123"
+
+
+# ── LLM provider selection ───────────────────────────────────────────
+
+class TestProviderSelection:
+    """LLM_PROVIDER / OLLAMA_* environment handling."""
+
+    def test_llm_provider_read_from_env(self, monkeypatch):
+        from config import get_llm_provider
+        monkeypatch.setenv("LLM_PROVIDER", "ollama")
+        assert get_llm_provider() == "ollama"
+
+    def test_unknown_provider_falls_back_to_groq(self, monkeypatch):
+        from config import get_llm_provider
+        monkeypatch.setenv("LLM_PROVIDER", "openai")
+        assert get_llm_provider() == "groq"
+
+    def test_ollama_selected_when_env_set(self, monkeypatch):
+        from financial_agent import create_agent
+        monkeypatch.setenv("LLM_PROVIDER", "ollama")
+        sentinel = MagicMock(name="OllamaModel")
+        with patch(
+            "backend.app.agent.financial_agent._build_ollama_model", return_value=sentinel
+        ) as build:
+            a = create_agent(tools=[])
+        build.assert_called_once()
+        assert a.model is sentinel
+
+    def test_ollama_unreachable_falls_back_to_groq_with_key(self, monkeypatch):
+        from financial_agent import create_agent
+        from agno.models.groq import Groq
+        monkeypatch.setenv("LLM_PROVIDER", "ollama")
+        with patch(
+            "backend.app.agent.financial_agent._build_ollama_model",
+            side_effect=RuntimeError("Ollama unavailable"),
+        ):
+            a = create_agent(tools=[])
+        assert isinstance(a.model, Groq)
+
+    def test_ollama_unreachable_without_groq_key_raises(self, monkeypatch):
+        from financial_agent import AgentNotConfiguredError, create_agent
+        monkeypatch.setenv("LLM_PROVIDER", "ollama")
+        monkeypatch.setenv("GROQ_API_KEY", "")
+        with patch(
+            "backend.app.agent.financial_agent._build_ollama_model",
+            side_effect=RuntimeError("Ollama unavailable"),
+        ):
+            with pytest.raises(AgentNotConfiguredError):
+                create_agent(tools=[])
+
+    def test_llm_status_reports_missing_groq_key(self, monkeypatch):
+        from financial_agent import llm_status
+        monkeypatch.setenv("GROQ_API_KEY", "")
+        status = llm_status()
+        assert status["provider"] == "groq"
+        assert status["configured"] is False
+
+
+# ── Per-session isolation ────────────────────────────────────────────
+
+class TestSessionIsolation:
+    """Each request must run on its own Agent instance (no shared run state)."""
+
+    def test_each_call_gets_fresh_agent_sharing_model_and_tools(self):
+        from financial_agent import FinancialAgentService, create_agent
+
+        svc = FinancialAgentService()
+        svc._agent = create_agent(tools=[])  # template
+        a1 = svc._agent_for("sess-a")
+        a2 = svc._agent_for("sess-b")
+        assert a1 is not a2
+        assert a1 is not svc._agent
+        assert a1.session_id == "sess-a" and a2.session_id == "sess-b"
+        assert a1.model is svc._agent.model
+        assert a1.add_history_to_messages is False
+
+    def test_run_passes_session_id(self):
+        from financial_agent import FinancialAgentService
+        mock_agent = MagicMock()
+        result = MagicMock(); result.content = "ok"
+        mock_agent.run.return_value = result
+        svc = FinancialAgentService(agent=mock_agent)
+        svc.run("hi", session_id="sess-x")
+        mock_agent.run.assert_called_once_with("hi", stream=False, session_id="sess-x")
+
+    def test_service_construction_does_not_build_agent(self, monkeypatch):
+        from financial_agent import FinancialAgentService
+        monkeypatch.setenv("GROQ_API_KEY", "")
+        svc = FinancialAgentService()  # must not raise without a key
+        assert svc._agent is None
 
 
 # ── FinancialAgentService ────────────────────────────────────────────
