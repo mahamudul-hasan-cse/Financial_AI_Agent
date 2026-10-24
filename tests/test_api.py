@@ -26,11 +26,26 @@ class TestHealth:
     """Tests for GET /api/health."""
 
     def test_health_returns_ok(self, client: TestClient):
-        res = client.get("/api/health")
+        with patch.dict("os.environ", {"GROQ_API_KEY": "test-key"}):
+            res = client.get("/api/health")
         assert res.status_code == 200
         data = res.json()
         assert data["status"] == "ok"
+        assert data["llm_configured"] is True
         assert "groq_configured" in data
+
+    def test_health_degraded_without_groq_key(self, client: TestClient):
+        """The server starts without GROQ_API_KEY and reports degraded health."""
+        with patch.dict("os.environ", {"GROQ_API_KEY": "", "LLM_PROVIDER": "groq"}):
+            data = client.get("/api/health").json()
+        assert data["status"] == "degraded"
+        assert data["llm_provider"] == "groq"
+        assert data["llm_configured"] is False
+        assert "GROQ_API_KEY" in data["detail"]
+
+    def test_health_needs_no_client_id(self, mock_agent):
+        from api import app
+        assert TestClient(app).get("/api/health").status_code == 200
 
     def test_health_shows_groq_configured(self, client: TestClient):
         with patch.dict("os.environ", {"GROQ_API_KEY": "test-key"}):
@@ -538,17 +553,10 @@ class TestInvalidInputs:
         assert res.status_code == 422
 
     def test_chat_wrong_http_method_get(self, client: TestClient):
-        """GET on /api/chat should not return a valid chat JSON response.
-
-        Note: If the SPA catch-all route is active, GET returns 200 with
-        HTML; otherwise FastAPI returns 405.  Either way, it must not be
-        a successful chat response.
-        """
+        """GET on /api/chat must be 405 JSON, never the SPA's HTML."""
         res = client.get("/api/chat")
-        assert res.status_code in (200, 405)
-        if res.status_code == 200:
-            # SPA fallback — should NOT be a chat JSON body
-            assert "response" not in (res.json() if "json" in res.headers.get("content-type", "") else {})
+        assert res.status_code == 405
+        assert "application/json" in res.headers["content-type"]
 
     def test_health_wrong_http_method_post(self, client: TestClient):
         """POST on /api/health should return 405 Method Not Allowed."""
@@ -630,7 +638,7 @@ class TestGracefulFailures:
 
     def test_nlp_pipeline_failure_propagates(self, client: TestClient):
         """If the NLP pipeline raises, the API should fall back to defaults."""
-        with patch("api.run_nlp_pipeline", side_effect=Exception("NLP boom")):
+        with patch("backend.app.services.chat.run_nlp_pipeline", side_effect=Exception("NLP boom")):
             response = client.post("/api/chat", json={"message": "crash nlp"})
 
         assert response.status_code == 200
@@ -697,7 +705,7 @@ class TestSchemaIntegration:
         from schemas import HealthResponse
 
         parsed = HealthResponse.model_validate(client.get("/api/health").json())
-        assert parsed.status == "ok"
+        assert parsed.status in ("ok", "degraded")
         assert isinstance(parsed.nlp_status.spacy_ner, bool)
 
     def test_stats_response_validates_against_schema(self, client: TestClient):
@@ -759,7 +767,7 @@ class TestNLPPipelineGracefulDegradation:
 
     def test_chat_succeeds_when_nlp_pipeline_raises(self, client: TestClient):
         """Chat should return 200 with default NLP metadata when the pipeline fails."""
-        with patch("api.run_nlp_pipeline", side_effect=RuntimeError("spaCy crashed")):
+        with patch("backend.app.services.chat.run_nlp_pipeline", side_effect=RuntimeError("spaCy crashed")):
             res = client.post("/api/chat", json={"message": "What is AAPL?"})
         assert res.status_code == 200
         data = res.json()
@@ -771,7 +779,7 @@ class TestNLPPipelineGracefulDegradation:
 
     def test_stream_succeeds_when_nlp_pipeline_raises(self, client: TestClient):
         """Streaming should emit default NLP metadata when the pipeline fails."""
-        with patch("api.run_nlp_pipeline", side_effect=RuntimeError("VADER crashed")):
+        with patch("backend.app.services.chat.run_nlp_pipeline", side_effect=RuntimeError("VADER crashed")):
             res = client.post("/api/chat/stream", json={"message": "TSLA news"})
         assert res.status_code == 200
         body = res.text
@@ -791,7 +799,7 @@ class TestNLPPipelineGracefulDegradation:
         from api import _stats
 
         before = _stats["total_messages"]
-        with patch("api.run_nlp_pipeline", side_effect=RuntimeError("boom")):
+        with patch("backend.app.services.chat.run_nlp_pipeline", side_effect=RuntimeError("boom")):
             client.post("/api/chat", json={"message": "test"})
         assert _stats["total_messages"] == before + 1
         assert _stats["classifier_usage"]["fallback"] >= 1

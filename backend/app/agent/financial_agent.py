@@ -278,6 +278,11 @@ class FinancialAgentService:
             return type(self._agent.model).__name__
         return get_llm_provider()
 
+    def ensure_ready(self) -> None:
+        """Build the template agent now; raises ``AgentNotConfiguredError`` if impossible."""
+        if not self._injected:
+            _ = self.agent
+
     def _agent_for(self, session_id: str | None) -> Agent:
         """Return an agent instance that is safe to use for *session_id*."""
         if self._injected:
