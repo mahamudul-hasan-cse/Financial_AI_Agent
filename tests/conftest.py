@@ -6,6 +6,8 @@ Environment is configured *before* any application module is imported:
   ``data/financial_agent.db``.
 * ``GROQ_API_KEY`` is removed, proving the app imports and starts without
   it (tests that build a real agno Agent set a fake key themselves).
+* A developer's ``.env`` is ignored (``config`` would otherwise load it and
+  re-add GROQ_API_KEY or change limits/retries), so results don't depend on it.
 """
 
 import os
@@ -13,6 +15,10 @@ import shutil
 import tempfile
 from collections import defaultdict
 from unittest.mock import MagicMock, patch
+
+import dotenv
+
+dotenv.load_dotenv = lambda *args, **kwargs: False  # before config is imported
 
 _TEST_DB_DIR = tempfile.mkdtemp(prefix="financial-agent-tests-")
 os.environ["DATABASE_PATH"] = os.path.join(_TEST_DB_DIR, "test.db")
