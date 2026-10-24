@@ -33,6 +33,7 @@ services:
       # When LLM_PROVIDER=ollama, point to the compose service, not localhost
       OLLAMA_HOST: "${OLLAMA_HOST:-http://ollama:11434}"
       DATABASE_PATH: /app/data/financial_agent.db
+      AGNO_TELEMETRY: "${AGNO_TELEMETRY:-false}"
     volumes:
       # Persist generated charts/Excel reports and the SQLite database
       - ./outputs:/app/outputs

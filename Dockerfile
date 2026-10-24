@@ -102,6 +102,7 @@ ENV PATH=/opt/venv/bin:$PATH \
     SPACY_MODEL=${SPACY_MODEL} \
     EMBEDDING_MODEL=${EMBEDDING_MODEL} \
     DATABASE_PATH=/app/data/financial_agent.db \
+    AGNO_TELEMETRY=false \
     PORT=8001 \
     FORWARDED_ALLOW_IPS=127.0.0.1
 
@@ -136,11 +137,15 @@ USER appuser
 
 EXPOSE 8001
 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD curl -fs "http://localhost:${PORT}/api/health" || exit 1
+# Liveness: /api/health answers 200 even when "degraded" (no LLM key), so an
+# unconfigured container is reported unhealthy only if the server is down.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -fsS --max-time 5 "http://127.0.0.1:${PORT}/api/health" > /dev/null || exit 1
 
-# Single worker on purpose: sessions cache, rate limits and stats live in
-# process memory (SQLite holds the durable data).
+# Single worker on purpose: sessions cache, rate limits, the TTL data cache
+# and stats live in process memory (SQLite holds the durable data).
+# Secrets (GROQ_API_KEY, API_KEY) come from the runtime env (--env-file /
+# platform secrets) — never bake them into the image.
 # Behind a PaaS load balancer set FORWARDED_ALLOW_IPS='*' so rate limits use
 # the real client IP from X-Forwarded-For.
 CMD ["sh", "-c", "exec uvicorn api:app --host 0.0.0.0 --port \"${PORT}\" --proxy-headers --forwarded-allow-ips \"${FORWARDED_ALLOW_IPS}\" --log-level info"]

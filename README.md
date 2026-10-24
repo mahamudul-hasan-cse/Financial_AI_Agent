@@ -32,7 +32,9 @@ bootstrap confidence intervals.
 
 ## Features
 
-- **Streaming answers** over Server-Sent Events, with staged progress messages and a stop button.
+- **Streaming answers** over Server-Sent Events, with staged progress messages, a stop button,
+  and visible "Retrying in Ns…" notices when the LLM is rate-limited.
+- **Copy and Regenerate** on every answer (Regenerate re-asks the previous question).
 - **NLP pre-processing on every question**, shown in a collapsible panel:
   - spaCy NER plus a company→ticker map and regex entities (TICKER, FIN_METRIC, DATE_REF, MONEY)
   - an 8-class intent classifier (TF-IDF + logistic regression, with a keyword fallback)
@@ -40,13 +42,15 @@ bootstrap confidence intervals.
 - **Intent-aware prompting.** Each intent (price, chart, comparison, news, fundamentals,
   recommendation, Excel, general) gets its own response-format rules. For price, news and
   recommendation questions, VADER sentiment over recent headlines is added to the prompt.
+- **Low-latency agent loop:** at most 3 tool calls per answer, compact cached tool output
+  (60 s TTL per ticker + function), a short system prompt and trimmed history.
 - **Agent tools (agno):** Yahoo Finance prices, fundamentals, analyst ratings and news;
   DuckDuckGo web and news search; matplotlib charts shown inline; downloadable Excel reports;
   RAG over a small financial-concepts knowledge base with citations.
 - **Groq or local Ollama** as the LLM, chosen with one environment variable.
 - **Saved conversations** in SQLite (rename, delete, reload). Each conversation is tied to an
   anonymous per-browser id, so users only see their own history.
-- **Dark/light theme, voice input and read-aloud** (Web Speech API).
+- **Dark/light theme and voice input** (Web Speech API).
 - **API-only extras:** watchlists, price/news alerts, company snapshots, multi-symbol
   comparison and PDF export (see [API reference](#api-reference)).
 
@@ -112,24 +116,28 @@ bootstrap confidence intervals.
 | Payload | Meaning |
 |---|---|
 | `[NLP_META]{json}` | NLP analysis (always first) |
+| `[STATUS]{json}` | Transient notice before any text, e.g. `{"type":"status","message":"Rate limit reached — retrying in 4s…"}` |
 | `"text chunk"` | JSON-encoded piece of the answer |
-| `[ERROR] message` | Generation failed (the stream still ends with `[DONE]`) |
+| `[ERROR] message` | Generation failed; the message is user-facing (the stream still ends with `[DONE]`) |
 | `[FINAL]"text"` | The saved answer. Clients replace the streamed text with it |
 | `[RESEARCH_DATA]{json}` | Structured research card |
 | `[DONE]` | End of stream |
 
-If generation fails before any text is sent, the server retries once. It never retries after
+If generation fails before any text is sent, the server retries up to `LLM_MAX_RETRIES` times
+(default 2), sending a `[STATUS]` event before each wait. On Groq 429s it waits for the
+`Retry-After` the API suggests (capped by `LLM_RETRY_MAX_DELAY`); the Groq SDK's own silent
+retries are disabled. When retries run out, a clear `[ERROR]` follows. It never retries after
 partial output, because that would duplicate text. The UI never re-asks via `/api/chat`, so
-each question costs one LLM run.
+each question costs at most `1 + LLM_MAX_RETRIES` LLM runs.
 
 | Layer | Technology |
 |---|---|
-| LLM | Groq `meta-llama/llama-4-scout-17b-16e-instruct` (default) or Ollama `qwen2.5:3b` |
+| LLM | Groq `openai/gpt-oss-120b` (default; `openai/gpt-oss-20b` is fastest) or Ollama `qwen2.5:3b` |
 | Agent framework | agno 1.8.4 |
 | API | FastAPI + uvicorn, SSE streaming, SQLite |
 | NLP | spaCy `en_core_web_sm`, VADER, scikit-learn TF-IDF + LogReg |
 | RAG | sentence-transformers `all-MiniLM-L6-v2` (TF-IDF fallback) |
-| Frontend | React 19, Vite 7, react-markdown, Recharts, Vitest |
+| Frontend | React 19, Vite 7, react-markdown and Recharts (lazy-loaded chunks), Vitest |
 
 ---
 
@@ -220,8 +228,14 @@ All settings are environment variables, read in `config.py`. `.env` is loaded wi
 | Variable | Default | Description |
 |---|---|---|
 | `LLM_PROVIDER` | `groq` | `groq` or `ollama` |
-| `GROQ_API_KEY` | (unset) | Needed for Groq. Without it the server still starts, `/api/health` reports `degraded`, and chat returns 503 |
-| `GROQ_MODEL` | `meta-llama/llama-4-scout-17b-16e-instruct` | Groq model id |
+| `GROQ_API_KEY` | (unset) | **Secret.** Needed for Groq. Without it the server still starts, `/api/health` reports `degraded`, and chat returns 503 |
+| `GROQ_MODEL` | `openai/gpt-oss-120b` | Groq model id. `openai/gpt-oss-20b` is the fastest; `qwen/qwen3.8-27b` is also supported |
+| `LLM_MAX_RETRIES` | `2` | Retries after the first attempt when the LLM fails before any text (e.g. 429). Each retry is announced to the UI |
+| `LLM_RETRY_MAX_DELAY` | `20` | Longest wait (seconds) before a retry, even if Groq's `Retry-After` is longer |
+| `AGENT_TOOL_CALL_LIMIT` | `3` | Max tool calls per answer; every tool round is another full model call |
+| `TOOL_OUTPUT_MAX_CHARS` | `2000` | Tool results are truncated to this many characters before the model sees them |
+| `CACHE_TTL_SECONDS` | `60` | Thread-safe TTL cache for yfinance data and tool results, per ticker + function. `0` disables it |
+| `AGNO_TELEMETRY` | `false` | agno usage telemetry. Defaulted to `false` in code, `.env.example` and the Dockerfile |
 | `OLLAMA_MODEL` | `qwen2.5:3b` | Ollama model tag |
 | `OLLAMA_HOST` | `http://localhost:11434` | Ollama server URL |
 | `SPACY_MODEL` | `en_core_web_sm` | spaCy model for NER and lemmatisation (`python -m spacy download <name>`) |
@@ -230,14 +244,22 @@ All settings are environment variables, read in `config.py`. `.env` is loaded wi
 | `OUTPUTS_DIR` | `outputs/` | Where charts and Excel files are written |
 | `HOST` / `PORT` | `0.0.0.0` / `8001` | Bind address for `python api.py` and the Docker image |
 | `FORWARDED_ALLOW_IPS` | `127.0.0.1` | Proxies trusted for `X-Forwarded-For`. Set `*` behind a PaaS load balancer so rate limits see real client IPs |
-| `CORS_ORIGINS` | `http://localhost:5173` | Comma-separated allowed origins |
-| `RATE_LIMIT_MAX` / `IP_RATE_LIMIT_MAX` / `RATE_LIMIT_WINDOW` | `10` / `30` / `60` | Requests per window (seconds), per session and per IP |
+| `CORS_ORIGINS` | `http://localhost:5173` | Comma-separated allowed origins (e.g. `https://app.example.com,https://www.example.com`) |
+| `RATE_LIMIT_PER_MINUTE` | `20` | Chat messages per minute per browser (`X-Client-Id`, or client IP without one). Over the limit: `429` with JSON `{"detail": ...}` and `Retry-After`. `0` disables |
+| `RATE_LIMIT_MAX` / `IP_RATE_LIMIT_MAX` / `RATE_LIMIT_WINDOW` | `10` / `30` / `60` | Chat requests per window (seconds), per session and per IP |
 | `SESSION_TTL` / `MAX_SESSIONS` | `1800` / `100` | Inactivity expiry (seconds) and session cap |
-| `API_KEY` | (unset) | If set, `/api/*` (except `/api/health`) requires the `X-API-Key` header. The bundled UI does not send it, so use it for API-only deployments |
+| `API_KEY` | (unset) | **Secret.** If set, `/api/*` (except `/api/health`) requires the `X-API-Key` header. The bundled UI does not send it, so use it for API-only deployments |
 | `LOG_LEVEL` | `INFO` | Python logging level |
 
 Frontend (build-time, `frontend/.env`): `VITE_API_URL` (default `/api`) and
 `VITE_OUTPUTS_URL` (default `/outputs`). Set both when the API runs on a different origin.
+Both are public: anything `VITE_*` ends up in the browser bundle, so never put secrets there.
+
+**Secrets.** Only `GROQ_API_KEY` and `API_KEY` are secret. Keep them in `.env` (git-ignored
+and excluded from the Docker build context) or in your platform's secret store, and pass
+them at runtime (`docker run --env-file .env`, compose `env_file`, PaaS dashboard). They are
+never baked into the image or exposed by `/api/health` (which only reports whether a key is
+configured).
 
 ---
 
@@ -338,8 +360,8 @@ the session cache, rate limits and stats live in process memory.
     and set `CORS_ORIGINS` if the frontend is hosted elsewhere
   - mount a persistent disk at `/app/data` (and optionally `/app/outputs`)
   - the image listens on `$PORT` (default 8001), which most platforms inject automatically
-  - point the health check at `/api/health`. It returns 200 even when `degraded`, so check the
-    `status` field when you want readiness.
+  - point the health check at `/api/health` (the image has a Docker `HEALTHCHECK` on it). It
+    returns 200 even when `degraded`, so check the `status` field when you want readiness.
 - **Vercel / Netlify:** suitable for the **frontend only**. Build `frontend/` with
   `VITE_API_URL=https://<api-host>/api` and `VITE_OUTPUTS_URL=https://<api-host>/outputs`,
   and add the frontend origin to the backend's `CORS_ORIGINS`. The API does not fit
@@ -362,7 +384,7 @@ Financial_AI_Agent/
 ├── nlp_pipeline.py            # spaCy NER + regex entities + VADER + intent
 ├── intent_classifier.py       # TF-IDF + LogisticRegression (8 intents)
 ├── persistence.py             # SQLite: sessions (with client_id), messages, watchlist, alerts
-├── cache.py                   # TTL + LRU cache in front of yfinance
+├── cache.py                   # thread-safe TTL + LRU cache (yfinance data, tool results)
 ├── market_service.py          # Snapshot / comparison / watchlist data
 ├── research_service.py        # Structured research card builder
 ├── financial_agent.py         # Back-compat shim → backend/app/agent
@@ -376,7 +398,7 @@ Financial_AI_Agent/
 │   ├── routers/               # health, chat, sessions, watchlist, alerts, market, export, files
 │   ├── services/              # chat (prompting/NLP), sessions (ownership/rate limits), export (PDF)
 │   └── agent/                 # agno Agent factory, tool registry, prompts
-├── tools/                     # chart_tools, excel_tools, rag_tools (agno toolkits)
+├── tools/                     # market_tools (cached Yahoo data), chart/excel/rag tools (agno toolkits)
 ├── schemas/                   # Pydantic request/response models
 ├── tests/                     # pytest suite (temp DB, no API key, offline)
 ├── data/company_tickers.json  # Company → ticker map (the SQLite DB is created here, git-ignored)
@@ -403,7 +425,7 @@ Financial_AI_Agent/
   DuckDuckGo. It can be delayed, rate-limited or wrong.
 - **Anonymous client ids, not accounts.** They separate users' histories but don't
   authenticate anyone.
-- **Single process.** In-memory rate limits and stats reset on restart. Scaling out would need
+- **Single process.** In-memory rate limits, the TTL data cache and stats reset on restart. Scaling out would need
   Redis (or similar) and a real database.
 - **Prompt injection:** user text and web results reach an agent that can write chart and
   Excel files. Filenames are sanitised, but output size and count are not capped.
