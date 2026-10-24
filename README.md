@@ -276,7 +276,7 @@ All settings are environment variables, read in `config.py`. `.env` is loaded wi
 | `CORS_ORIGINS` | `http://localhost:5173` | Comma-separated allowed origins (e.g. `https://app.example.com,https://www.example.com`) |
 | `RATE_LIMIT_PER_MINUTE` | `20` | Chat messages per minute per browser (`X-Client-Id`, or client IP without one). Over the limit: `429` with JSON `{"detail": ...}` and `Retry-After`. `0` disables |
 | `RATE_LIMIT_MAX` / `IP_RATE_LIMIT_MAX` / `RATE_LIMIT_WINDOW` | `10` / `30` / `60` | Chat requests per window (seconds), per session and per IP |
-| `SESSION_TTL` / `MAX_SESSIONS` | `1800` / `100` | Inactivity expiry (seconds) and session cap |
+| `SESSION_TTL` / `MAX_SESSIONS` | `2592000` (30 days) / `1000` | Inactivity expiry (seconds) and session cap |
 | `API_KEY` | (unset) | **Secret.** If set, `/api/*` (except `/api/health`) requires the `X-API-Key` header. The bundled UI does not send it, so use it for API-only deployments |
 | `LOG_LEVEL` | `INFO` | Python logging level |
 
