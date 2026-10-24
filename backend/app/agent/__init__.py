@@ -25,11 +25,11 @@ from backend.app.agent.financial_agent import (  # noqa: F401
 from backend.app.agent.prompts import BEHAVIOURAL_RULES, TOOL_CATALOGUE  # noqa: F401
 from backend.app.agent.tool_registry import TOOL_FACTORIES, build_tools  # noqa: F401
 
-__all__ = [
+__all__ = [  # noqa: F822
     "FinancialAgentService",
     "AgentNotConfiguredError",
     "agent_service",
-    "agent",
+    "agent",  # resolved lazily via __getattr__
     "create_agent",
     "get_agent_service",
     "llm_status",

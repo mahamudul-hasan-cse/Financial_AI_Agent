@@ -33,11 +33,11 @@ from backend.app.agent.prompts import (  # noqa: F401
 from backend.app.agent.tool_registry import TOOL_FACTORIES, build_tools  # noqa: F401
 from backend.app.agent.tool_registry import build_tools as _build_tools  # noqa: F401
 
-__all__ = [
+__all__ = [  # noqa: F822
     "FinancialAgentService",
     "AgentNotConfiguredError",
     "agent_service",
-    "agent",
+    "agent",  # resolved lazily via __getattr__
     "create_agent",
     "get_agent_service",
     "llm_status",

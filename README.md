@@ -1,254 +1,415 @@
-# Financial AI Agent — CSE495B NLP Project
+# Financial AI Agent
 
-A full-stack financial research assistant that combines a production-grade NLP pipeline with a Groq-hosted LLM and an interactive React chat interface. Built for CSE495B (Natural Language Processing).
+**Ask a question about a stock, get a sourced, structured answer.** A local NLP pipeline
+(NER, intent classification, sentiment) analyses each question first, then an LLM agent
+with live market-data, web-search, charting, Excel and RAG tools answers it and streams
+the result into a React chat UI.
 
----
+Built as a CSE495B (Natural Language Processing) course project, so it ships with
+evaluation tooling: a gold-standard test set, an ablation study, calibration and
+bootstrap confidence intervals.
 
-## Architecture
-
-| Layer | Technology |
-|---|---|
-| **LLM Backend** | Groq API — `meta-llama/llama-4-scout-17b-16e-instruct` |
-| **Local LLM** | Ollama — `qwen2.5:3b` (offline fallback) |
-| **Agent Framework** | agno 1.8.4 |
-| **API** | FastAPI + SSE streaming |
-| **NLP Pipeline** | spaCy `en_core_web_md` + VADER + TF-IDF Intent Classifier |
-| **RAG Embeddings** | `sentence-transformers/all-mpnet-base-v2` (768-dim) |
-| **Frontend** | React 19 + Vite 7 + Recharts |
+> Educational project, **not financial advice**.
 
 ---
 
-## NLP Components
+## Contents
 
-| # | Component | Model / Library | Purpose |
-|---|---|---|---|
-| 1 | **Named Entity Recognition** | spaCy `en_core_web_md` | Extracts ORG, PERSON, GPE, PRODUCT entities |
-| 2 | **Financial NER** | Custom regex patterns | Extracts TICKER, FIN_METRIC, DATE_REF, MONEY |
-| 3 | **Sentiment Analysis** | VADER (`nltk`) | Compound score + positive/neutral/negative label |
-| 4 | **Intent Classification (ML)** | TF-IDF + Logistic Regression | 8-class intent; 93.75% accuracy on gold-standard set |
-| 5 | **Intent Classification (KW)** | Keyword matching | Fallback when ML confidence < threshold |
-| 6 | **RAG Retrieval** | `all-mpnet-base-v2` + BM25 re-ranking | Query expansion + source citations |
-
----
-
-## Agent Tools (14 total)
-
-**Stock Data (YFinance)**
-- `get_current_stock_price` — real-time price and change
-- `get_stock_fundamentals` — P/E, EPS, market cap, revenue
-- `get_analyst_recommendations` — buy/hold/sell breakdown
-- `get_company_news` — recent headlines
-
-**Web Search (DuckDuckGo)**
-- `duckduckgo_search` — general web search
-- `duckduckgo_news` — news search
-
-**Chart Generation (matplotlib)**
-- `create_stock_chart` — line chart with fill and price annotation
-- `create_comparison_bar_chart` — side-by-side stock price comparison
-- `create_comparison_overlay_chart` — normalized overlay chart
-- `generate_line_chart` — generic line chart from data
-- `generate_bar_chart` — generic bar chart from data
-- `generate_pie_chart` — generic pie chart from data
-
-**Excel Reports (openpyxl + pandas)**
-- `create_stock_excel_report` — multi-sheet report (Summary, Fundamentals, Price History)
-- `create_comparison_excel` — side-by-side comparison workbook
-- `create_excel_sheet` — generic data-to-Excel export
+- [Features](#features)
+- [Screenshots](#screenshots)
+- [Architecture](#architecture)
+- [Quick start](#quick-start)
+- [Configuration](#configuration)
+- [Running tests](#running-tests)
+- [Evaluation](#evaluation)
+- [API reference](#api-reference)
+- [Deployment](#deployment)
+- [Project structure](#project-structure)
+- [Design decisions and limitations](#design-decisions-and-limitations)
+- [License](#license)
 
 ---
 
 ## Features
 
-- **Streaming responses** via SSE with real-time token delivery
-- **Intent-aware formatting** — each intent (stock_price, chart, comparison, news, fundamentals, recommendation, excel, general) has its own response format rules
-- **NLP metadata panel** — shows detected intent + confidence %, entities, sentiment in a collapsible UI panel
-- **Chart display** — generated PNG charts appear inline in the chat
-- **Excel download** — generated reports are directly downloadable
-- **Session management** — persistent chat history with rename and delete
-- **Dark / light mode** with localStorage persistence
-- **Voice output** via Web Speech API
-- **Starter prompts** and follow-up suggestions
-- **RAG** with query expansion and source citations
-- **Quantitative evaluation** — 80-example gold-standard test set, per-class P/R/F1
+- **Streaming answers** over Server-Sent Events, with staged progress messages and a stop button.
+- **NLP pre-processing on every question**, shown in a collapsible panel:
+  - spaCy NER plus a company→ticker map and regex entities (TICKER, FIN_METRIC, DATE_REF, MONEY)
+  - an 8-class intent classifier (TF-IDF + logistic regression, with a keyword fallback)
+  - VADER sentiment
+- **Intent-aware prompting.** Each intent (price, chart, comparison, news, fundamentals,
+  recommendation, Excel, general) gets its own response-format rules. For price, news and
+  recommendation questions, VADER sentiment over recent headlines is added to the prompt.
+- **Agent tools (agno):** Yahoo Finance prices, fundamentals, analyst ratings and news;
+  DuckDuckGo web and news search; matplotlib charts shown inline; downloadable Excel reports;
+  RAG over a small financial-concepts knowledge base with citations.
+- **Groq or local Ollama** as the LLM, chosen with one environment variable.
+- **Saved conversations** in SQLite (rename, delete, reload). Each conversation is tied to an
+  anonymous per-browser id, so users only see their own history.
+- **Dark/light theme, voice input and read-aloud** (Web Speech API).
+- **API-only extras:** watchlists, price/news alerts, company snapshots, multi-symbol
+  comparison and PDF export (see [API reference](#api-reference)).
+
+## Screenshots
+
+> _Placeholder: no screenshots are committed yet._ Suggested captures, to be saved under
+> `docs/screenshots/` and linked here:
+>
+> 1. Empty state with starter prompts (dark theme)
+> 2. A streamed answer with the NLP panel expanded
+> 3. A generated chart rendered inline
+> 4. Light theme and the conversation-history sidebar
+> 5. `/docs` (FastAPI OpenAPI UI)
 
 ---
 
-## Academic Results
+## Architecture
 
-| Metric | Value |
+```
+┌──────────────────────────┐   SSE / JSON (X-Client-Id header)
+│ React 19 + Vite (SPA)    │ ────────────────────────────────────┐
+│ src/App.jsx, src/api.js  │                                     │
+└──────────────────────────┘                                     ▼
+                                     ┌───────────────────────────────────────────────┐
+                                     │ FastAPI  — api.py → backend/app/main.py        │
+                                     │  middleware: CORS · gzip · request log · key  │
+                                     │  routers:  health · chat · sessions · export  │
+                                     │            watchlist · alerts · market · files│
+                                     └───────┬───────────────┬───────────────┬───────┘
+                                             │               │               │
+                 ┌───────────────────────────▼──┐  ┌─────────▼─────────┐  ┌──▼──────────────┐
+                 │ services/chat.py             │  │ services/sessions │  │ persistence.py  │
+                 │  nlp_pipeline.py             │  │  ownership checks │  │  SQLite         │
+                 │   ├ spaCy NER (SPACY_MODEL)  │  │  rate limits      │  │  (DATABASE_PATH)│
+                 │   ├ intent_classifier.py     │  └───────────────────┘  └─────────────────┘
+                 │   └ VADER sentiment          │
+                 │  prompt = intent rules       │
+                 │         + sentiment          │
+                 │         + session history    │
+                 └──────────────┬───────────────┘
+                                │ fresh agno Agent per request
+                 ┌──────────────▼───────────────────────────────────────┐
+                 │ backend/app/agent  (Groq Llama-4-Scout  |  Ollama)   │
+                 │  tools: YFinance · DuckDuckGo · charts · Excel · RAG │
+                 │         (cache.py TTL cache in front of yfinance)    │
+                 └──────────────────────────────────────────────────────┘
+```
+
+**Request flow (`POST /api/chat/stream`).**
+
+1. The server resolves the session and checks it belongs to the caller's `X-Client-Id`.
+2. It applies the per-session and per-IP rate limits.
+3. The NLP pipeline runs, and its result is sent as the first SSE event.
+4. The server builds the prompt: intent instructions, optional headline sentiment, and the last
+   10 messages of *this* session only.
+5. A fresh agno `Agent` streams the answer. It shares the model client and toolkits with other
+   requests but keeps its own run state, so nothing crosses sessions.
+6. The cleaned answer is saved and sent as `[FINAL]`, followed by a structured research card
+   and `[DONE]`.
+
+**SSE protocol.** Each event is one `data:` line:
+
+| Payload | Meaning |
 |---|---|
-| Intent classifier accuracy | **93.75%** (80-example gold-standard set) |
-| Cross-validation accuracy | 75.5% (TF-IDF n-gram 1-2) |
-| Test suite | **310 tests passing** |
-| Test coverage | **66%** |
-| LLM latency (Groq) | ~500 ms |
-| LLM latency (Ollama qwen2.5:3b) | ~2 500 ms |
-| RAG embedding model | all-mpnet-base-v2 (768-dim) |
-| spaCy model | en_core_web_md |
+| `[NLP_META]{json}` | NLP analysis (always first) |
+| `"text chunk"` | JSON-encoded piece of the answer |
+| `[ERROR] message` | Generation failed (the stream still ends with `[DONE]`) |
+| `[FINAL]"text"` | The saved answer. Clients replace the streamed text with it |
+| `[RESEARCH_DATA]{json}` | Structured research card |
+| `[DONE]` | End of stream |
+
+If generation fails before any text is sent, the server retries once. It never retries after
+partial output, because that would duplicate text. The UI never re-asks via `/api/chat`, so
+each question costs one LLM run.
+
+| Layer | Technology |
+|---|---|
+| LLM | Groq `meta-llama/llama-4-scout-17b-16e-instruct` (default) or Ollama `qwen2.5:3b` |
+| Agent framework | agno 1.8.4 |
+| API | FastAPI + uvicorn, SSE streaming, SQLite |
+| NLP | spaCy `en_core_web_sm`, VADER, scikit-learn TF-IDF + LogReg |
+| RAG | sentence-transformers `all-MiniLM-L6-v2` (TF-IDF fallback) |
+| Frontend | React 19, Vite 7, react-markdown, Recharts, Vitest |
 
 ---
 
-## Setup
+## Quick start
 
 ### Prerequisites
 
-- Python 3.11+
-- Node.js 18+
-- A [Groq API key](https://console.groq.com/) (free tier available)
-- *(Optional)* [Ollama](https://ollama.ai/) for local inference
+- Python **3.12+**
+- Node.js **20+** (CI and Docker use 22)
+- A [Groq API key](https://console.groq.com/) (free tier available), **or** a local
+  [Ollama](https://ollama.com/) install
 
-### Backend
+### 1. Backend
 
 ```bash
-cd Ai_Agent
+git clone <your-fork-url> Financial_AI_Agent
+cd Financial_AI_Agent
+
 python -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-python -m spacy download en_core_web_md
+source .venv/bin/activate              # Windows: .venv\Scripts\activate
+
+# Optional but recommended: CPU-only torch (much smaller than the default CUDA build)
+pip install torch==2.14.1 --index-url https://download.pytorch.org/whl/cpu
+
+pip install -r requirements-dev.txt    # runtime + test deps (requirements.txt = runtime only)
+python -m spacy download en_core_web_sm
+
+cp .env.example .env                   # then set GROQ_API_KEY (or LLM_PROVIDER=ollama)
+python api.py                          # → http://localhost:8001  (PORT to change)
 ```
 
-### Frontend
+The RAG embedding model (about 90 MB) downloads the first time a question uses RAG. Use
+`uvicorn api:app --reload --port 8001` while developing the backend.
+
+### 2. Frontend (dev server)
 
 ```bash
-cd Ai_Agent/frontend
-npm install
+cd frontend
+npm ci
+npm run dev                            # → http://localhost:5173 (proxies /api and /outputs to :8001)
 ```
 
-### Environment Variables
+If the backend runs on another port, set `API_PROXY_TARGET=http://localhost:<port>` before
+`npm run dev`.
 
-Create `Ai_Agent/.env`:
-
-| Variable | Required | Description |
-|---|---|---|
-| `GROQ_API_KEY` | Yes | Groq API key |
-| `OLLAMA_BASE_URL` | No | Ollama URL (default: `http://localhost:11434`) |
-| `OLLAMA_MODEL` | No | Ollama model (default: `qwen2.5:3b`) |
-| `LLM_PROVIDER` | No | `groq` or `ollama` (default: `groq`) |
-
-### Running
+### 3. Single-port production build
 
 ```bash
-# Terminal 1 — Backend
-cd Ai_Agent
-python api.py
-# → http://localhost:8001
-
-# Terminal 2 — Frontend (dev)
-cd Ai_Agent/frontend
-npm run dev
-# → http://localhost:5173
-
-# Production (single port)
-cd Ai_Agent/frontend && npm run build && cd ..
-python api.py
-# → http://localhost:8001
+cd frontend && npm run build && cd ..
+python api.py                          # serves the SPA from frontend/dist at http://localhost:8001
 ```
 
-### Running with Ollama (local, no API key needed)
+### Docker
 
 ```bash
-# Install and pull the model
+cp .env.example .env                   # set GROQ_API_KEY
+docker compose up --build              # → http://localhost:8001
+```
+
+The image builds the frontend and installs CPU-only torch. It also bakes in the spaCy and
+sentence-transformers models the app loads, so it runs offline after the build. To bake
+different models, use `--build-arg SPACY_MODEL=… --build-arg EMBEDDING_MODEL=…`. Charts and
+reports are kept in `./outputs`, and the SQLite database in the `financial-ai-agent-data`
+volume.
+
+### Using Ollama instead of Groq
+
+```bash
 ollama pull qwen2.5:3b
-
-# Set provider in .env
-echo "LLM_PROVIDER=ollama" >> .env
-
-# Start backend as normal
-python api.py
+# in .env
+LLM_PROVIDER=ollama
+OLLAMA_MODEL=qwen2.5:3b
+OLLAMA_HOST=http://localhost:11434
 ```
+
+With Docker: `docker compose --profile ollama up --build`, then
+`docker exec financial-ai-ollama ollama pull qwen2.5:3b`. Compose already points
+`OLLAMA_HOST` at the `ollama` service. If Ollama is unreachable, the agent falls back to Groq
+when `GROQ_API_KEY` is set. Otherwise chat returns 503.
 
 ---
 
-## Running Tests
+## Configuration
+
+All settings are environment variables, read in `config.py`. `.env` is loaded with
+`override=False`, so variables set in your shell, Docker or PaaS always win.
+
+| Variable | Default | Description |
+|---|---|---|
+| `LLM_PROVIDER` | `groq` | `groq` or `ollama` |
+| `GROQ_API_KEY` | (unset) | Needed for Groq. Without it the server still starts, `/api/health` reports `degraded`, and chat returns 503 |
+| `GROQ_MODEL` | `meta-llama/llama-4-scout-17b-16e-instruct` | Groq model id |
+| `OLLAMA_MODEL` | `qwen2.5:3b` | Ollama model tag |
+| `OLLAMA_HOST` | `http://localhost:11434` | Ollama server URL |
+| `SPACY_MODEL` | `en_core_web_sm` | spaCy model for NER and lemmatisation (`python -m spacy download <name>`) |
+| `EMBEDDING_MODEL` | `all-MiniLM-L6-v2` | sentence-transformers model for RAG (`all-mpnet-base-v2` is a little better and uses about 5× the RAM) |
+| `DATABASE_PATH` | `data/financial_agent.db` | SQLite file (`SQLITE_PATH` is still accepted) |
+| `OUTPUTS_DIR` | `outputs/` | Where charts and Excel files are written |
+| `HOST` / `PORT` | `0.0.0.0` / `8001` | Bind address for `python api.py` and the Docker image |
+| `FORWARDED_ALLOW_IPS` | `127.0.0.1` | Proxies trusted for `X-Forwarded-For`. Set `*` behind a PaaS load balancer so rate limits see real client IPs |
+| `CORS_ORIGINS` | `http://localhost:5173` | Comma-separated allowed origins |
+| `RATE_LIMIT_MAX` / `IP_RATE_LIMIT_MAX` / `RATE_LIMIT_WINDOW` | `10` / `30` / `60` | Requests per window (seconds), per session and per IP |
+| `SESSION_TTL` / `MAX_SESSIONS` | `1800` / `100` | Inactivity expiry (seconds) and session cap |
+| `API_KEY` | (unset) | If set, `/api/*` (except `/api/health`) requires the `X-API-Key` header. The bundled UI does not send it, so use it for API-only deployments |
+| `LOG_LEVEL` | `INFO` | Python logging level |
+
+Frontend (build-time, `frontend/.env`): `VITE_API_URL` (default `/api`) and
+`VITE_OUTPUTS_URL` (default `/outputs`). Set both when the API runs on a different origin.
+
+---
+
+## Running tests
 
 ```bash
-cd Ai_Agent
-pytest --tb=short -q
-# 310 passed
-
-# With coverage
+pytest -q                               # backend suite, no API key or network needed
 pytest --cov=. --cov-report=term-missing
+
+cd frontend
+npm test                                # Vitest + Testing Library
+npm run lint && npm run build
 ```
 
-### Evaluation scripts
+The backend tests use a temporary SQLite database. `tests/conftest.py` sets `DATABASE_PATH`
+before importing the app, and `persistence.reset_for_tests()` refuses to touch the default
+DB. The tests also remove `GROQ_API_KEY`, mock the LLM, and stub live market data.
+
+Coverage includes:
+
+- API endpoints and SSE framing, including retry without duplicated text
+- session ownership across clients
+- session-id validation and PDF-export path safety
+- CORS, JSON 404s and degraded health
+- persistence
+- agent construction and provider selection
+- NLP pipeline, intent classifier, evaluation helpers, chart and Excel tools
+- on the frontend: the SSE parser (events split across reads), client-id handling, the App
+  streaming flow, and the UI components
+
+---
+
+## Evaluation
 
 ```bash
-# Quantitative NLP evaluation (80-example gold-standard set)
-python evaluation.py
+python evaluation.py        # intent (keyword vs ML), NER, RAG, calibration, bootstrap CIs
+python ablation_study.py    # contribution of each NLP component
+python error_analysis.py    # misclassified examples
+python generate_visualizations.py   # figures → outputs/figures/
+```
 
-# Ablation study (impact of each NLP component)
-python ablation_study.py
+Results from `python evaluation.py` with the default models (`en_core_web_sm`,
+`all-MiniLM-L6-v2`, scikit-learn 1.9):
+
+| Metric | Value |
+|---|---|
+| Intent accuracy, ML (TF-IDF + LogReg), 80-example gold set | **95.0%** (macro-F1 95.1%) |
+| Intent accuracy, keyword baseline, same set | 81.3% |
+| NER precision / recall / F1 (gold set) | 71.7% / 91.5% / 80.4% |
+| RAG MRR / Recall@5 (gold queries) | 100% / 100% |
+
+Read these numbers with the caveats under
+[Design decisions and limitations](#design-decisions-and-limitations). The test set is small
+and written by the author, and the RAG knowledge base is tiny. Re-run the scripts after
+changing models or dependencies, because the numbers will move.
+
+---
+
+## API reference
+
+Interactive docs: **`/docs`** (Swagger UI) and `/openapi.json`.
+
+Every endpoint except `/api/health`, `/api/stats`, `/api/snapshot` and `/api/compare` needs
+an **`X-Client-Id`** header: 16–128 characters from `[A-Za-z0-9_-]`. The web UI creates one
+per browser and keeps it in `localStorage`. Sessions, watchlists and alerts belong to the
+client id that created them. Other clients get `404`. This keeps users' histories apart but is
+**not** authentication: anyone who has the id can act as that browser.
+
+Session ids must match `^[A-Za-z0-9_-]{1,64}$`.
+
+| Method & path | Purpose |
+|---|---|
+| `GET /api/health` | Status (`ok` / `degraded`), LLM provider and config, NLP availability |
+| `GET /api/stats` | In-process usage counters (reset on restart) |
+| `POST /api/chat` | Non-streaming chat → `{response, session_id, nlp_metadata, structured_response}` |
+| `POST /api/chat/stream` | Streaming chat (SSE, see the protocol above) |
+| `DELETE /api/chat/{session_id}` | Delete a session |
+| `GET /api/sessions` · `GET/PATCH /api/sessions/{id}` | List, read and rename your sessions |
+| `POST /api/chat/export` | PDF transcript (rendered in a temp dir and deleted after sending) |
+| `POST/DELETE /api/watchlist` · `GET /api/watchlist/{id}` | Per-session watchlist with live prices |
+| `POST /api/alerts` · `GET /api/alerts/{id}` · `GET /api/alerts/{id}/check` · `PATCH/DELETE /api/alerts/item/{alert_id}` | Price, digest and news alerts |
+| `GET /api/snapshot/{symbol}` · `GET /api/compare?symbols=AAPL,MSFT` | Company snapshot and comparison table |
+| `GET /outputs/{charts,sheets}/{file}` | Generated files |
+
+Unknown `/api/*` paths return a JSON `404`. All other unknown `GET` paths serve the SPA.
+
+---
+
+## Deployment
+
+The backend needs long-lived SSE connections, a writable disk (SQLite and `outputs/`) and
+about 1 GB of RAM to be safe with the default models. Deploy it as **one container with one worker**:
+the session cache, rate limits and stats live in process memory.
+
+- **Render / Railway / Fly.io / Azure Container Apps / App Service (container):** build from
+  the `Dockerfile`. Then:
+  - set `GROQ_API_KEY`, set `FORWARDED_ALLOW_IPS=*` (the platform proxy sets `X-Forwarded-For`),
+    and set `CORS_ORIGINS` if the frontend is hosted elsewhere
+  - mount a persistent disk at `/app/data` (and optionally `/app/outputs`)
+  - the image listens on `$PORT` (default 8001), which most platforms inject automatically
+  - point the health check at `/api/health`. It returns 200 even when `degraded`, so check the
+    `status` field when you want readiness.
+- **Vercel / Netlify:** suitable for the **frontend only**. Build `frontend/` with
+  `VITE_API_URL=https://<api-host>/api` and `VITE_OUTPUTS_URL=https://<api-host>/outputs`,
+  and add the frontend origin to the backend's `CORS_ORIGINS`. The API does not fit
+  serverless functions (SSE duration limits, no persistent disk).
+- **Memory:** with the defaults, the container uses about 530 MB idle and peaks at about
+  0.7 GB RSS once the RAG model is loaded (measured with the Docker image, CPU torch). If RAM
+  is tight, `EMBEDDING_MODEL` can point at any small sentence-transformers model. If it fails
+  to load, RAG falls back to TF-IDF. The image is about 2 GB.
+
+No deploy manifests (`render.yaml`, `fly.toml`, Bicep) are included yet.
+
+---
+
+## Project structure
+
+```
+Financial_AI_Agent/
+├── api.py                     # Entry-point: `uvicorn api:app` / `python api.py`
+├── config.py                  # All environment settings
+├── nlp_pipeline.py            # spaCy NER + regex entities + VADER + intent
+├── intent_classifier.py       # TF-IDF + LogisticRegression (8 intents)
+├── persistence.py             # SQLite: sessions (with client_id), messages, watchlist, alerts
+├── cache.py                   # TTL + LRU cache in front of yfinance
+├── market_service.py          # Snapshot / comparison / watchlist data
+├── research_service.py        # Structured research card builder
+├── financial_agent.py         # Back-compat shim → backend/app/agent
+├── evaluation.py · ablation_study.py · error_analysis.py · generate_visualizations.py
+├── backend/app/
+│   ├── main.py                # FastAPI app factory
+│   ├── middleware.py          # CORS, gzip, request logging, optional API key
+│   ├── security.py            # X-Client-Id dependency, client IP
+│   ├── state.py               # In-memory session cache, rate-limit windows, stats
+│   ├── nlp_models.py          # Shared spaCy loader
+│   ├── routers/               # health, chat, sessions, watchlist, alerts, market, export, files
+│   ├── services/              # chat (prompting/NLP), sessions (ownership/rate limits), export (PDF)
+│   └── agent/                 # agno Agent factory, tool registry, prompts
+├── tools/                     # chart_tools, excel_tools, rag_tools (agno toolkits)
+├── schemas/                   # Pydantic request/response models
+├── tests/                     # pytest suite (temp DB, no API key, offline)
+├── data/company_tickers.json  # Company → ticker map (the SQLite DB is created here, git-ignored)
+├── outputs/                   # Generated charts / sheets (git-ignored)
+├── frontend/                  # React app (src/App.jsx, src/api.js, components, __tests__)
+├── Dockerfile · docker-compose.yml · .github/workflows/ci.yml
+└── requirements.txt (runtime, pinned) · requirements-dev.txt (tests)
 ```
 
 ---
 
-## Project Structure
+## Design decisions and limitations
 
-```
-Ai_Agent/
-├── api.py                        # FastAPI backend (SSE streaming, sessions, NLP)
-├── financial_agent.py            # Agent shim → backend/app/agent/
-├── nlp_pipeline.py               # spaCy NER + VADER + intent pipeline
-├── intent_classifier.py          # TF-IDF + LogisticRegression (8-class)
-├── evaluation.py                 # Quantitative NLP evaluation
-├── ablation_study.py             # NLP component ablation study
-├── research_service.py           # Structured response builder
-├── market_service.py             # Market context helpers
-├── persistence.py                # SQLite session/alert persistence
-├── cache.py                      # In-memory cache layer
-├── config.py                     # App settings (pydantic)
-├── requirements.txt
-├── pyproject.toml                # pytest config
-├── Dockerfile
-├── docker-compose.yml
-│
-├── backend/app/agent/
-│   ├── financial_agent.py        # agno Agent construction
-│   ├── tool_registry.py          # Toolkit factory with graceful degradation
-│   └── prompts.py                # System prompt + intent format rules
-│
-├── tools/
-│   ├── chart_tools.py            # matplotlib PNG generation (self-contained)
-│   ├── excel_tools.py            # openpyxl Excel reports (self-contained)
-│   └── rag_tools.py              # RAG: query expansion + re-ranking + citations
-│
-├── schemas/
-│   ├── chat.py                   # Request/response models
-│   ├── nlp.py                    # NLPMetadata TypedDict
-│   └── streaming.py              # SSE event models
-│
-├── tests/
-│   ├── test_nlp_pipeline.py      # 45 NLP tests
-│   ├── test_intent_classifier.py # 16 classifier tests
-│   ├── test_evaluation.py        # 13 evaluation tests
-│   ├── test_api.py               # API endpoint tests
-│   ├── test_agent.py             # Agent config tests
-│   ├── test_chart_tools.py       # Chart tool tests
-│   └── test_excel_tools.py       # Excel tool tests
-│
-├── data/
-│   └── company_tickers.json      # Ticker → company name mapping
-│
-├── outputs/
-│   ├── charts/                   # Generated PNG charts (git-ignored)
-│   └── sheets/                   # Generated Excel files (git-ignored)
-│
-└── frontend/
-    ├── src/
-    │   ├── App.jsx               # Main chat UI
-    │   ├── App.css               # Design tokens + dark/light theme
-    │   ├── ResearchCard.jsx      # Message renderer + inline chart display
-    │   ├── NLPPanel.jsx          # Intent/entity/sentiment display panel
-    │   ├── StockChart.jsx        # Auto-recharts from markdown tables
-    │   ├── SessionsSidebar.jsx   # Chat history sidebar
-    │   └── ErrorBoundary.jsx
-    ├── package.json
-    └── vite.config.js            # Dev proxy: /api + /outputs → :8001
-```
+- **TF-IDF + logistic regression for intent,** not an LLM classifier. It is fast, free,
+  deterministic and explainable (the confidence is shown in the UI), and it degrades to
+  keyword rules. The trade-off is that the training data is small (about 200 examples) and
+  synthetic.
+- **The evaluation set is author-written,** in the same style as the training data. Treat the
+  gold-set accuracy as an optimistic in-distribution estimate. `evaluation.py` reports
+  bootstrap confidence intervals for this reason.
+- **The RAG knowledge base is tiny** (16 hand-written concept chunks), so the perfect
+  RAG scores mostly show that the pipeline works, not retrieval quality at scale.
+- **Market data comes from unofficial Yahoo Finance endpoints** (via `yfinance`) and
+  DuckDuckGo. It can be delayed, rate-limited or wrong.
+- **Anonymous client ids, not accounts.** They separate users' histories but don't
+  authenticate anyone.
+- **Single process.** In-memory rate limits and stats reset on restart. Scaling out would need
+  Redis (or similar) and a real database.
+- **Prompt injection:** user text and web results reach an agent that can write chart and
+  Excel files. Filenames are sanitised, but output size and count are not capped.
 
 ---
 
 ## License
 
-Academic project — CSE495B, Spring 2026.
+[MIT](LICENSE) © 2026 Md. Mahamudul Hasan. Originally developed for CSE495B (NLP), Spring 2026.

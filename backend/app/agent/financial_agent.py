@@ -36,11 +36,11 @@ from config import (
 
 logger = logging.getLogger("financial_agent")
 
-__all__ = [
+__all__ = [  # noqa: F822
     "FinancialAgentService",
     "AgentNotConfiguredError",
     "agent_service",
-    "agent",
+    "agent",  # resolved lazily via __getattr__
     "create_agent",
     "get_agent_service",
     "llm_status",

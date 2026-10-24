@@ -1,5 +1,11 @@
 name: CI
 
+env:
+  # Must match what the app loads (config.py defaults / Dockerfile build args)
+  SPACY_MODEL: en_core_web_sm
+  EMBEDDING_MODEL: all-MiniLM-L6-v2
+  TORCH_VERSION: "2.14.1"
+
 on:
   push:
     branches: [main, master, develop]
@@ -13,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.11", "3.12"]
+        python-version: ["3.12", "3.13"]
 
     steps:
       - uses: actions/checkout@v4
@@ -26,19 +32,25 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ matrix.python-version }}-${{ hashFiles('requirements.txt') }}
+          key: ${{ runner.os }}-pip-${{ matrix.python-version }}-${{ hashFiles('requirements*.txt') }}
           restore-keys: ${{ runner.os }}-pip-${{ matrix.python-version }}-
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          python -m spacy download en_core_web_sm
+          pip install "torch==${TORCH_VERSION}" --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements-dev.txt
+          python -m spacy download "${SPACY_MODEL}"
 
+      - name: Cache sentence-transformers model
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-${{ env.EMBEDDING_MODEL }}
+
+      # No GROQ_API_KEY on purpose: the suite must not need one.
       - name: Run tests with coverage
-        env:
-          GROQ_API_KEY: "test-key-for-ci"
-        run: python -m pytest tests/ -v --tb=short -q
+        run: python -m pytest -q --cov=. --cov-report=term-missing
 
   # ── Python linting ──────────────────────────────────────────────────
   lint:
@@ -76,7 +88,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: "npm"
           cache-dependency-path: frontend/package-lock.json
 
@@ -95,3 +107,25 @@ jobs:
       - name: Build
         working-directory: frontend
         run: npm run build
+
+  # ── Docker image build (no push) ────────────────────────────────────
+  docker:
+    name: Docker Build
+    runs-on: ubuntu-latest
+    needs: [test, frontend]
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: financial-ai-agent:ci
+          build-args: |
+            SPACY_MODEL=${{ env.SPACY_MODEL }}
+            EMBEDDING_MODEL=${{ env.EMBEDDING_MODEL }}
+            TORCH_VERSION=${{ env.TORCH_VERSION }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

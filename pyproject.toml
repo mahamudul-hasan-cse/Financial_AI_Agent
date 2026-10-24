@@ -3,7 +3,8 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
-addopts = "-v --tb=short --basetemp=.pytest_tmp --cov=. --cov-report=term-missing --cov-config=pyproject.toml"
+# Coverage is opt-in: pytest --cov=. --cov-report=term-missing
+addopts = "--tb=short"
 
 [tool.coverage.run]
 source = ["."]
@@ -26,7 +27,7 @@ exclude_lines = [
 
 [tool.black]
 line-length = 100
-target-version = ["py311"]
+target-version = ["py312"]
 
 [tool.isort]
 profile = "black"

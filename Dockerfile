@@ -3,11 +3,21 @@
 # =============================================================================
 #
 # Build:  docker build -t financial-ai-agent .
-# Run:    docker compose up
+# Run:    docker run -p 8001:8001 --env-file .env financial-ai-agent
+#         (or: docker compose up --build)
 #
-# Stage 1 — Node 22: compile React/Vite frontend to static files
-# Stage 2 — Python 3.12-slim: FastAPI backend + pre-downloaded NLP models
+# Stage 1 — Node 22: compile the React/Vite frontend to static files
+# Stage 2 — Python 3.12: build a virtualenv with CPU-only torch + NLP models
+# Stage 3 — Python 3.12-slim runtime: venv + app source, no compilers
+#
+# The spaCy and sentence-transformers models baked into the image are the
+# same ones the code loads at runtime (SPACY_MODEL / EMBEDDING_MODEL), so the
+# container starts fully offline. Override both with --build-arg.
 # =============================================================================
+
+ARG SPACY_MODEL=en_core_web_sm
+ARG EMBEDDING_MODEL=all-MiniLM-L6-v2
+ARG TORCH_VERSION=2.14.1
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -19,65 +29,86 @@ WORKDIR /build/frontend
 
 # Install deps first — layer is cached until package-lock.json changes
 COPY frontend/package.json frontend/package-lock.json ./
-RUN npm ci --frozen-lockfile
+RUN npm ci
 
 COPY frontend/ ./
 RUN npm run build
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Stage 2 — Python runtime
+# Stage 2 — Python dependencies + models
+# ─────────────────────────────────────────────────────────────────────────────
+FROM python:3.12-slim AS python-build
+
+ARG SPACY_MODEL
+ARG EMBEDDING_MODEL
+ARG TORCH_VERSION
+
+# Compilers are only needed here, in case a dependency has no wheel.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends build-essential libffi-dev \
+ && rm -rf /var/lib/apt/lists/*
+
+ENV VIRTUAL_ENV=/opt/venv \
+    PATH=/opt/venv/bin:$PATH \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    HF_HOME=/opt/hf-cache \
+    SENTENCE_TRANSFORMERS_HOME=/opt/hf-cache/sentence_transformers \
+    HF_HUB_DISABLE_PROGRESS_BARS=1
+RUN python -m venv /opt/venv
+
+# CPU-only torch first: the default PyPI wheel bundles CUDA (~2+ GB extra).
+RUN pip install "torch==${TORCH_VERSION}" --index-url https://download.pytorch.org/whl/cpu
+
+COPY requirements.txt ./
+RUN pip install -r requirements.txt
+
+# Bake the exact models the app loads into the image.
+RUN python -m spacy download "${SPACY_MODEL}" \
+ && python -c "import spacy; spacy.load('${SPACY_MODEL}'); print('spaCy ${SPACY_MODEL} OK')" \
+ && python -c "from sentence_transformers import SentenceTransformer; \
+SentenceTransformer('${EMBEDDING_MODEL}'); print('sentence-transformers ${EMBEDDING_MODEL} OK')"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Stage 3 — Runtime
 # ─────────────────────────────────────────────────────────────────────────────
 FROM python:3.12-slim AS runtime
+
+ARG SPACY_MODEL
+ARG EMBEDDING_MODEL
 
 LABEL org.opencontainers.image.title="Financial AI Agent"
 LABEL org.opencontainers.image.description="FastAPI + Groq/Ollama LLM + React — full-stack financial assistant"
 
-# ── System packages ───────────────────────────────────────────────────────────
-# build-essential + libffi-dev : compile any C-extension wheels
-# curl                         : HEALTHCHECK + outbound API calls
-# ca-certificates              : TLS verification for Groq/HuggingFace APIs
+# curl: HEALTHCHECK · ca-certificates: TLS to Groq / Yahoo / DuckDuckGo
 RUN apt-get update \
- && apt-get install -y --no-install-recommends \
-        build-essential \
-        libffi-dev \
-        curl \
-        ca-certificates \
+ && apt-get install -y --no-install-recommends curl ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# ── Environment ───────────────────────────────────────────────────────────────
-ENV PYTHONPATH=/app \
+ENV PATH=/opt/venv/bin:$PATH \
+    PYTHONPATH=/app \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    # Matplotlib must use non-interactive backend in a headless container
     MPLBACKEND=Agg \
-    # Pin HuggingFace/sentence-transformers cache inside /app so it is
-    # owned by appuser and can optionally be volume-mounted for persistence
-    HF_HOME=/app/.cache/huggingface \
-    SENTENCE_TRANSFORMERS_HOME=/app/.cache/sentence_transformers \
-    TRANSFORMERS_CACHE=/app/.cache/huggingface/hub \
-    # Silence HF Hub "token not set" warning in logs
+    HF_HOME=/opt/hf-cache \
+    SENTENCE_TRANSFORMERS_HOME=/opt/hf-cache/sentence_transformers \
     HF_HUB_DISABLE_PROGRESS_BARS=1 \
-    TOKENIZERS_PARALLELISM=false
+    HF_HUB_OFFLINE=1 \
+    TOKENIZERS_PARALLELISM=false \
+    SPACY_MODEL=${SPACY_MODEL} \
+    EMBEDDING_MODEL=${EMBEDDING_MODEL} \
+    DATABASE_PATH=/app/data/financial_agent.db \
+    PORT=8001 \
+    FORWARDED_ALLOW_IPS=127.0.0.1
 
-# ── Layer 1: Python dependencies (cached until requirements.txt changes) ──────
-COPY requirements.txt ./
-RUN pip install --no-cache-dir --upgrade pip \
- && pip install --no-cache-dir -r requirements.txt
+COPY --from=python-build /opt/venv /opt/venv
+COPY --from=python-build /opt/hf-cache /opt/hf-cache
 
-# ── Layer 2: Pre-download NLP models (cached unless deps change) ──────────────
-# Baking models into the image avoids cold-start downloads on every container
-# restart and makes the app work fully offline after the first build.
-RUN python -m spacy download en_core_web_sm \
- && python -c "\
-from sentence_transformers import SentenceTransformer; \
-m = SentenceTransformer('all-MiniLM-L6-v2'); \
-print('sentence-transformers: all-MiniLM-L6-v2 cached OK')"
-
-# ── Layer 3: Application source (changes most often — last for cache efficiency)
-# Core app files
+# ── Application source ──────────────────────────────────────────────────────
 COPY api.py \
      financial_agent.py \
      nlp_pipeline.py \
@@ -88,37 +119,28 @@ COPY api.py \
      persistence.py \
      research_service.py \
      ./
-# Python packages
 COPY backend/  ./backend/
 COPY schemas/  ./schemas/
 COPY tools/    ./tools/
-# Static data (company_tickers.json etc. — *.db excluded via .dockerignore)
+# Static data (company_tickers.json — *.db excluded via .dockerignore)
 COPY data/     ./data/
 
-# ── Output directories (will be bind-mounted at runtime — pre-create for perms)
-RUN mkdir -p outputs/charts outputs/sheets
-
-# ── Frontend static files from Stage 1 ───────────────────────────────────────
 COPY --from=frontend-build /build/frontend/dist ./frontend/dist
 
-# ── Non-root user (least-privilege principle) ─────────────────────────────────
-RUN groupadd --gid 1001 appgroup \
- && useradd  --uid 1001 --gid appgroup \
-             --shell /bin/false \
-             --no-create-home \
-             appuser \
+# ── Non-root user; data/ and outputs/ are writable (mount volumes there) ────
+RUN mkdir -p outputs/charts outputs/sheets data \
+ && groupadd --gid 1001 appgroup \
+ && useradd  --uid 1001 --gid appgroup --shell /bin/false --no-create-home appuser \
  && chown -R appuser:appgroup /app
 USER appuser
 
 EXPOSE 8001
 
-# start_period gives uvicorn + agno time to fully initialise before checks begin
-HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
-    CMD curl -fs http://localhost:8001/api/health || exit 1
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD curl -fs "http://localhost:${PORT}/api/health" || exit 1
 
-# Single worker is correct — sessions are stored in-memory (no shared state)
-CMD ["uvicorn", "api:app", \
-     "--host", "0.0.0.0", \
-     "--port", "8001", \
-     "--log-level", "info", \
-     "--access-log"]
+# Single worker on purpose: sessions cache, rate limits and stats live in
+# process memory (SQLite holds the durable data).
+# Behind a PaaS load balancer set FORWARDED_ALLOW_IPS='*' so rate limits use
+# the real client IP from X-Forwarded-For.
+CMD ["sh", "-c", "exec uvicorn api:app --host 0.0.0.0 --port \"${PORT}\" --proxy-headers --forwarded-allow-ips \"${FORWARDED_ALLOW_IPS}\" --log-level info"]

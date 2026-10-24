@@ -20,12 +20,12 @@ import logging
 import re
 import string
 
+from backend.app.nlp_models import load_spacy_model
+
 logger = logging.getLogger(__name__)
 
 # ── Text Preprocessing ──────────────────────────────────────────────────────
 # Shares the spaCy model loaded by the NLP pipeline (SPACY_MODEL env var).
-from backend.app.nlp_models import load_spacy_model
-
 _lemmatizer_nlp = load_spacy_model()
 _SPACY_LEMMA_AVAILABLE = _lemmatizer_nlp is not None
 # Lemmatisation only needs the tagger/lemmatizer; skip the expensive components.

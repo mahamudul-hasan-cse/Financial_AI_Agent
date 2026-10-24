@@ -1,12 +1,15 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
+// Dev-server proxy target for the FastAPI backend (match the backend's PORT).
+const apiTarget = process.env.API_PROXY_TARGET || 'http://localhost:8001'
+
 export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
-      '/api': 'http://localhost:8001',
-      '/outputs': 'http://localhost:8001',
+      '/api': apiTarget,
+      '/outputs': apiTarget,
     },
   },
   test: {
