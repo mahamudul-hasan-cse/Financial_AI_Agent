@@ -18,7 +18,7 @@ load_dotenv(override=False)
 
 APP_DIR = Path(__file__).resolve().parent
 
-DEFAULT_GROQ_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
+DEFAULT_GROQ_MODEL = "openai/gpt-oss-120b"
 DEFAULT_OLLAMA_MODEL = "qwen2.5:3b"
 DEFAULT_OLLAMA_HOST = "http://localhost:11434"
 DEFAULT_SPACY_MODEL = "en_core_web_sm"

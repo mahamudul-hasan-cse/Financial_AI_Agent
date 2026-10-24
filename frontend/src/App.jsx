@@ -32,8 +32,12 @@ function getSpeechRecognitionConstructor() {
   return window.SpeechRecognition || window.webkitSpeechRecognition || null
 }
 
-function buildSpeechText(message) {
-  return message.content || ''
+const VOICE_ERRORS = {
+  'not-allowed': 'Microphone permission denied. Allow mic access in your browser settings.',
+  'service-not-allowed': 'Microphone permission denied. Allow mic access in your browser settings.',
+  'audio-capture': 'No microphone found.',
+  'no-speech': 'No speech detected. Try again.',
+  'network': 'Voice recognition needs an internet connection.',
 }
 
 export default function App() {
@@ -46,7 +50,6 @@ export default function App() {
   const [loadingStage, setLoadingStage]     = useState(LOADING_STAGES[0])
   const [historyLoading, setHistoryLoading] = useState(false)
   const [listening, setListening]           = useState(false)
-  const [speakingId, setSpeakingId]         = useState(null)
   const [sidebarOpen, setSidebarOpen]       = useState(false)
 
   useEffect(() => {
@@ -63,6 +66,7 @@ export default function App() {
   const abortRef         = useRef(null)
   const recognitionRef   = useRef(null)
   const textareaRef      = useRef(null)
+  const voiceSupported   = !!getSpeechRecognitionConstructor()
   const { addToast, ToastContainer } = useToast()
 
   useEffect(() => { loadSavedSessions() }, [])
@@ -72,8 +76,7 @@ export default function App() {
   useEffect(() => () => {
     resetStageTimer()
     abortRef.current?.abort()
-    recognitionRef.current?.stop?.()
-    window.speechSynthesis?.cancel()
+    recognitionRef.current?.abort?.()
   }, [])
 
   async function loadSavedSessions(activeId = null) {
@@ -103,9 +106,8 @@ export default function App() {
   function handleNewChat() {
     abortRef.current?.abort('switch')
     resetStageTimer()
-    recognitionRef.current?.stop?.()
-    window.speechSynthesis?.cancel()
-    setListening(false); setSpeakingId(null); setMessages([])
+    recognitionRef.current?.abort?.()
+    setListening(false); setMessages([])
     setInput(''); setLoading(false); setSessionId(generateSessionId()); setSidebarOpen(false)
   }
 
@@ -143,29 +145,29 @@ export default function App() {
     const Ctor = getSpeechRecognitionConstructor()
     if (!Ctor) { addToast('Voice input not supported in this browser.', 'info'); return }
     if (listening && recognitionRef.current) { recognitionRef.current.stop(); return }
+    const base = input.trim()
     const rec = new Ctor()
-    rec.lang = 'en-US'; rec.interimResults = true; rec.maxAlternatives = 1
+    rec.lang = 'en-US'; rec.interimResults = true; rec.continuous = false; rec.maxAlternatives = 1
     rec.onstart  = () => setListening(true)
-    rec.onend    = () => setListening(false)
-    rec.onerror  = () => { setListening(false); addToast('Voice input interrupted.', 'error') }
+    rec.onend    = () => {
+      setListening(false)
+      if (recognitionRef.current === rec) recognitionRef.current = null
+      textareaRef.current?.focus()
+    }
+    rec.onerror  = e => {
+      setListening(false)
+      if (e?.error === 'aborted') return
+      addToast(VOICE_ERRORS[e?.error] || 'Voice input interrupted.', 'error')
+    }
     rec.onresult = e => {
-      const t = Array.from(e.results).map(r => r[0]?.transcript || '').join(' ').trim()
-      setInput(t)
+      const t = Array.from(e.results).map(r => r[0]?.transcript || '').join('').trim()
+      setInput(base ? `${base} ${t}` : t)
     }
     recognitionRef.current = rec
-    rec.start()
-  }
-
-  function handleSpeakMessage(message, messageId) {
-    if (!window.speechSynthesis) { addToast('Voice playback not supported.', 'info'); return }
-    if (speakingId === messageId) { window.speechSynthesis.cancel(); setSpeakingId(null); return }
-    window.speechSynthesis.cancel()
-    const utt = new SpeechSynthesisUtterance(buildSpeechText(message))
-    utt.rate = 1; utt.pitch = 1
-    utt.onend  = () => setSpeakingId(null)
-    utt.onerror = () => setSpeakingId(null)
-    setSpeakingId(messageId)
-    window.speechSynthesis.speak(utt)
+    try { rec.start() } catch {
+      recognitionRef.current = null; setListening(false)
+      addToast('Could not start voice input.', 'error')
+    }
   }
 
   async function sendMessage(prefilled = null) {
@@ -370,15 +372,6 @@ export default function App() {
                     <div className="message-bubble">
                       {message.role === 'agent' ? (
                         <div className="agent-card">
-                          <div className="agent-card-toolbar">
-                            <button
-                              className={`tool-btn ${speakingId === msgId ? 'speaking' : ''}`}
-                              onClick={() => handleSpeakMessage(message, msgId)}
-                              type="button"
-                            >
-                              {speakingId === msgId ? '⏹ Stop' : '▶ Voice'}
-                            </button>
-                          </div>
 
                           <MessageErrorBoundary>
                             <ResearchCard content={message.content} data={message.structuredResponse} />
@@ -447,14 +440,19 @@ export default function App() {
                   placeholder="Ask about any stock, comparison, or market…"
                 />
                 <div className="composer-actions">
-                  <button
-                    className={`voice-btn ${listening ? 'active' : ''}`}
-                    onClick={handleVoiceInput}
-                    type="button"
-                    title={listening ? 'Stop listening' : 'Voice input'}
-                  >
-                    🎙
-                  </button>
+                  {voiceSupported && (
+                    <button
+                      className={`voice-btn ${listening ? 'active' : ''}`}
+                      onClick={handleVoiceInput}
+                      type="button"
+                      disabled={loading}
+                      aria-pressed={listening}
+                      aria-label={listening ? 'Stop listening' : 'Voice input'}
+                      title={listening ? 'Stop listening' : 'Voice input'}
+                    >
+                      🎙
+                    </button>
+                  )}
                   {loading ? (
                     <button
                       className="send-btn"

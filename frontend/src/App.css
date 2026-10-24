@@ -522,36 +522,6 @@ a { color: var(--accent); }
   overflow: hidden;
 }
 
-.agent-card-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--border-subtle);
-  gap: 6px;
-}
-
-.tool-btn {
-  padding: 5px 10px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  background: transparent;
-  color: var(--text-muted);
-  font-size: 12px;
-  transition: all 0.15s;
-}
-
-.tool-btn:hover {
-  border-color: var(--border-strong);
-  color: var(--text);
-  background: var(--surface-hover);
-}
-
-.tool-btn.speaking {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-
 /* ── Assistant prose ──────────────────────────────────────────────────────── */
 .assistant-answer {
   padding: 18px 20px;
