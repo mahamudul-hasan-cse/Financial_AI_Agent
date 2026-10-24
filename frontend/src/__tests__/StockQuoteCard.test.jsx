@@ -76,7 +76,8 @@ describe('StockQuoteCard', () => {
 describe('App stock card', () => {
   const research = intent => JSON.stringify({ title: 't', summary: 's', intent, quote: QUOTE })
 
-  function stubStream(intent) {
+  function stubStream(intent, tickers = ['AAPL']) {
+    const nlp = JSON.stringify({ intent, entities: tickers.map(t => ({ text: t, label: 'TICKER', ticker: t })) })
     vi.stubGlobal('fetch', vi.fn(async url => {
       if (String(url).endsWith('/sessions')) {
         return new Response(JSON.stringify({ sessions: [] }), { status: 200 })
@@ -84,7 +85,7 @@ describe('App stock card', () => {
       const body = new ReadableStream({
         start(c) {
           c.enqueue(new TextEncoder().encode(
-            `data: [FINAL]"Apple trades at $190.50."\n\ndata: [RESEARCH_DATA]${research(intent)}\n\ndata: [DONE]\n\n`,
+            `data: [NLP_META]${nlp}\n\ndata: [FINAL]"Apple trades at $190.50."\n\ndata: [RESEARCH_DATA]${research(intent)}\n\ndata: [DONE]\n\n`,
           ))
           c.close()
         },
@@ -109,9 +110,15 @@ describe('App stock card', () => {
     expect(screen.getByRole('region', { name: 'AAPL quote' })).toBeInTheDocument()
   })
 
-  it('skips the single-ticker card for comparisons', async () => {
-    stubStream('comparison')
+  it('skips the single-ticker card for multi-ticker comparisons', async () => {
+    stubStream('comparison', ['AAPL', 'MSFT'])
     await ask()
     expect(screen.queryByRole('region', { name: 'AAPL quote' })).not.toBeInTheDocument()
+  })
+
+  it('still shows the card when a comparison intent has only one ticker', async () => {
+    stubStream('comparison', ['AAPL'])
+    await ask()
+    expect(screen.getByRole('region', { name: 'AAPL quote' })).toBeInTheDocument()
   })
 })

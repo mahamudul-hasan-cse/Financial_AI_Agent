@@ -460,6 +460,41 @@ def analyze_sentiment(text: str) -> dict:
     return {"label": label, "score": confidence, "compound": round(compound, 3)}
 
 
+_EXPLICIT_COMPARISON_RE = re.compile(
+    r"\b(compare[sd]?|comparing|comparison|vs\.?|versus|against|side[- ]by[- ]side|"
+    r"difference between|better than)\b",
+    re.IGNORECASE,
+)
+
+
+def _entity_tickers(entities: list[dict]) -> list[str]:
+    """Return unique ticker symbols found in *entities*, in order."""
+    seen: list[str] = []
+    for ent in entities:
+        ticker = ent.get("ticker")
+        if ticker and ticker not in seen:
+            seen.append(ticker)
+    return seen
+
+
+def _reconcile_comparison_intent(
+    text: str, intent: str, confidence: float, method: str, tickers: list[str]
+) -> tuple[str, float, str]:
+    """Make the comparison intent consistent with the tickers in the query.
+
+    A comparison needs two or more tickers, or explicit compare/vs wording.
+    The ML classifier sometimes labels single-stock questions such as
+    "How's Tesla performing?" as comparisons at low confidence, which hid the
+    stock card in the UI.
+    """
+    explicit = bool(_EXPLICIT_COMPARISON_RE.search(text))
+    if intent == "comparison" and len(tickers) < 2 and not explicit:
+        return ("stock_price" if tickers else "general", confidence, method)
+    if intent != "comparison" and len(tickers) >= 2 and explicit:
+        return ("comparison", confidence, method)
+    return (intent, confidence, method)
+
+
 def run_nlp_pipeline(text: str) -> NLPMetadata:
     """Run the full NLP preprocessing pipeline on a user query.
 
@@ -474,9 +509,13 @@ def run_nlp_pipeline(text: str) -> NLPMetadata:
         NLPMetadata with entities, intent, confidence, sentiment, and flags.
     """
     intent, confidence, method = classify_intent_with_confidence(text)
+    entities = extract_entities(text)
+    intent, confidence, method = _reconcile_comparison_intent(
+        text, intent, confidence, method, _entity_tickers(entities)
+    )
 
     return NLPMetadata(
-        entities=extract_entities(text),
+        entities=entities,
         intent=intent,
         intent_confidence=confidence,
         intent_method=method,

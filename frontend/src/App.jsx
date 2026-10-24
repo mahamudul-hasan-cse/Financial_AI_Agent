@@ -10,7 +10,7 @@ import NLPPanel from './NLPPanel.jsx'
 import Sidebar from './Sidebar.jsx'
 import StockChart from './StockChart.jsx'
 import StockQuoteCard from './StockQuoteCard.jsx'
-import { hasQuote } from './quote.js'
+import { shouldShowQuote } from './quote.js'
 import { useToast } from './useToast.jsx'
 import { useSpeechInput, VOICE_LANGUAGES } from './useSpeechInput.js'
 import { apiFetch, createSSEParser, generateSessionId, interpretEvent } from './api.js'
@@ -97,7 +97,7 @@ function TypingSkeleton({ label }) {
 function AgentMessage({ message, isStreaming, loading, loadingStage, canRegenerate, onCopy, onRegenerate }) {
   const [showDetails, setShowDetails] = useState(false)
   const quote = message.structuredResponse?.quote
-  const showQuote = hasQuote(quote) && message.structuredResponse?.intent !== 'comparison'
+  const showQuote = shouldShowQuote(message.structuredResponse, message.nlpMeta)
   const hasDetails = !!message.nlpMeta
   const waiting = isStreaming && !message.content
 
