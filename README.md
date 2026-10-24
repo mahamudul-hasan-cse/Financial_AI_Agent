@@ -121,7 +121,7 @@ bootstrap confidence intervals.
 | `[ERROR] message` | Generation failed; the message is user-facing (the stream still ends with `[DONE]`) |
 | `[FINAL]"text"` | The saved answer. Clients replace the streamed text with it |
 | `[RESEARCH_DATA]{json}` | Structured research card |
-| `[MODEL_INFO]{json}` | Who answered, e.g. `{"provider":"openrouter","model":"google/gemma-4-26b-a4b-it:free","fallback":true}` |
+| `[MODEL_INFO]{json}` | Who answered, e.g. `{"provider":"openrouter","model":"nvidia/nemotron-3.5-super-vl:free","fallback":true}` |
 | `[DONE]` | End of stream |
 
 **Backup provider.** When Groq answers 429 (rate limit) or 5xx, or can't be reached, the same
@@ -246,8 +246,8 @@ All settings are environment variables, read in `config.py`. `.env` is loaded wi
 | `LLM_RETRY_MAX_DELAY` | `20` | Longest wait (seconds) before a retry, even if Groq's `Retry-After` is longer |
 | `OPENROUTER_API_KEY` | (unset) | **Secret.** Turns on the automatic backup used when Groq is rate-limited or down |
 | `FALLBACK_PROVIDER` | `openrouter` if `OPENROUTER_API_KEY` is set, else `none` | Backup LLM provider. `none` disables it |
-| `OPENROUTER_MODEL` | `google/gemma-4-26b-a4b-it:free` | First backup model (tool calling tested) |
-| `OPENROUTER_FALLBACK_MODELS` | `nvidia/nemotron-3.5-super-vl:free` | Comma-separated models tried in order if the previous one errors or returns 429. Empty means none |
+| `OPENROUTER_MODEL` | `nvidia/nemotron-3.5-super-vl:free` | First backup model (tool calling tested) |
+| `OPENROUTER_FALLBACK_MODELS` | `google/gemma-4-26b-a4b-it:free` | Comma-separated models tried in order if the previous one errors or returns 429. Empty means none |
 | `AGENT_TOOL_CALL_LIMIT` | `3` | Max tool calls per answer; every tool round is another full model call |
 | `TOOL_OUTPUT_MAX_CHARS` | `2000` | Tool results are truncated to this many characters before the model sees them |
 | `CACHE_TTL_SECONDS` | `60` | Thread-safe TTL cache for yfinance data and tool results, per ticker + function. `0` disables it |

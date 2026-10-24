@@ -34,8 +34,8 @@ DEFAULT_EMBEDDING_MODEL = "all-MiniLM-L6-v2"
 SUPPORTED_LLM_PROVIDERS = ("groq", "ollama")
 SUPPORTED_FALLBACK_PROVIDERS = ("openrouter", "none")
 # OpenRouter backup models (both support tool calling on the free tier).
-DEFAULT_OPENROUTER_MODEL = "google/gemma-4-26b-a4b-it:free"
-DEFAULT_OPENROUTER_FALLBACK_MODELS = "nvidia/nemotron-3.5-super-vl:free"
+DEFAULT_OPENROUTER_MODEL = "nvidia/nemotron-3.5-super-vl:free"
+DEFAULT_OPENROUTER_FALLBACK_MODELS = "google/gemma-4-26b-a4b-it:free"
 
 
 def _env(name: str, default: str) -> str:

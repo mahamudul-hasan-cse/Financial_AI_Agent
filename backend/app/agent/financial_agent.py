@@ -325,6 +325,8 @@ def _build_openrouter_model(model_id: str) -> Any:
         max_retries=0,
         # agno's OpenRouter default (1024) cuts longer analyses short.
         max_tokens=4096,
+        # Free upstreams can hang ~120s; give up fast and fall through.
+        timeout=float(os.getenv("OPENROUTER_TIMEOUT_SECONDS", "30")),
         http_client=_groq_http_client(),
     )
 
