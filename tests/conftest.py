@@ -27,10 +27,14 @@ os.environ.pop("SQLITE_PATH", None)
 os.environ.pop("GROQ_API_KEY", None)
 os.environ.pop("GROQ_MODEL", None)
 for _name in (
-    "OPENROUTER_API_KEY", "FALLBACK_PROVIDER", "OPENROUTER_MODEL", "OPENROUTER_FALLBACK_MODELS"
+    "OPENROUTER_API_KEY",
+    "FALLBACK_PROVIDER",
+    "OPENROUTER_MODEL",
+    "OPENROUTER_FALLBACK_MODELS",
+    "OPENROUTER_TIMEOUT_SECONDS",
 ):
     os.environ.pop(_name, None)
-os.environ["LLM_PROVIDER"] = "groq"
+os.environ.pop("LLM_PROVIDER", None)  # default: groq without OPENROUTER_API_KEY
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402

@@ -31,9 +31,10 @@ DEFAULT_OLLAMA_MODEL = "qwen2.5:3b"
 DEFAULT_OLLAMA_HOST = "http://localhost:11434"
 DEFAULT_SPACY_MODEL = "en_core_web_sm"
 DEFAULT_EMBEDDING_MODEL = "all-MiniLM-L6-v2"
-SUPPORTED_LLM_PROVIDERS = ("groq", "ollama")
+SUPPORTED_LLM_PROVIDERS = ("openrouter", "groq", "ollama")
 SUPPORTED_FALLBACK_PROVIDERS = ("openrouter", "none")
-# OpenRouter backup models (paid; tool calling tested).
+# OpenRouter models (paid; tool calling tested). OPENROUTER_MODEL is the
+# primary when LLM_PROVIDER=openrouter and the first backup when it is groq.
 DEFAULT_OPENROUTER_MODEL = "openai/gpt-oss-120b"
 DEFAULT_OPENROUTER_FALLBACK_MODELS = "google/gemini-2.5-flash"
 
@@ -51,13 +52,19 @@ def _env_int(name: str, default: int, minimum: int = 0) -> int:
         return default
 
 
-def get_llm_provider() -> str:
-    """Return the configured LLM provider (``groq`` or ``ollama``).
+def default_llm_provider() -> str:
+    """``openrouter`` when ``OPENROUTER_API_KEY`` is set, else ``groq``."""
+    return "openrouter" if get_openrouter_api_key() else "groq"
 
-    Unknown values fall back to ``groq``.
+
+def get_llm_provider() -> str:
+    """Return the primary LLM provider (``openrouter``, ``groq`` or ``ollama``).
+
+    ``LLM_PROVIDER`` picks it; when unset (or unknown) it defaults to
+    ``openrouter`` if ``OPENROUTER_API_KEY`` is set and ``groq`` otherwise.
     """
-    provider = _env("LLM_PROVIDER", "groq").lower()
-    return provider if provider in SUPPORTED_LLM_PROVIDERS else "groq"
+    provider = _env("LLM_PROVIDER", "").lower()
+    return provider if provider in SUPPORTED_LLM_PROVIDERS else default_llm_provider()
 
 
 def get_groq_model() -> str:
@@ -76,10 +83,11 @@ def get_openrouter_api_key() -> str | None:
 
 
 def get_fallback_provider() -> str:
-    """Return the backup LLM provider used when Groq is busy or down.
+    """Return whether backup models are used when the primary is busy or down.
 
     ``FALLBACK_PROVIDER`` defaults to ``openrouter`` when ``OPENROUTER_API_KEY``
-    is set and ``none`` otherwise; ``none`` (or any unknown value) disables it.
+    is set and ``none`` otherwise; ``none`` (or any unknown value) disables the
+    whole backup chain (OpenRouter backups and, for an OpenRouter primary, Groq).
     """
     default = "openrouter" if get_openrouter_api_key() else "none"
     provider = _env("FALLBACK_PROVIDER", default).lower()

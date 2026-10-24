@@ -47,7 +47,8 @@ bootstrap confidence intervals.
 - **Agent tools (agno):** Yahoo Finance prices, fundamentals, analyst ratings and news;
   DuckDuckGo web and news search; matplotlib charts shown inline; downloadable Excel reports;
   RAG over a small financial-concepts knowledge base with citations.
-- **Groq or local Ollama** as the LLM, chosen with one environment variable.
+- **OpenRouter, Groq or local Ollama** as the LLM, chosen with one environment variable, with
+  an automatic backup chain when the primary is busy.
 - **Saved conversations** in SQLite (rename, delete, reload). Each conversation is tied to an
   anonymous per-browser id, so users only see their own history.
 - **Dark/light theme and voice input** (Web Speech API).
@@ -93,7 +94,7 @@ bootstrap confidence intervals.
                  └──────────────┬───────────────┘
                                 │ fresh agno Agent per request
                  ┌──────────────▼───────────────────────────────────────┐
-                 │ backend/app/agent  (Groq Llama-4-Scout  |  Ollama)   │
+                 │ backend/app/agent  (OpenRouter | Groq | Ollama)      │
                  │  tools: YFinance · DuckDuckGo · charts · Excel · RAG │
                  │         (cache.py TTL cache in front of yfinance)    │
                  └──────────────────────────────────────────────────────┘
@@ -116,7 +117,7 @@ bootstrap confidence intervals.
 | Payload | Meaning |
 |---|---|
 | `[NLP_META]{json}` | NLP analysis (always first) |
-| `[STATUS]{json}` | Transient notice before any text, e.g. `{"type":"status","message":"Rate limit reached — retrying in 4s…"}` or `"Groq busy — switched to backup model"` |
+| `[STATUS]{json}` | Transient notice before any text, e.g. `{"type":"status","message":"Rate limit reached — retrying in 4s…"}` or `"Primary model busy — switched to backup model"` |
 | `"text chunk"` | JSON-encoded piece of the answer |
 | `[ERROR] message` | Generation failed; the message is user-facing (the stream still ends with `[DONE]`) |
 | `[FINAL]"text"` | The saved answer. Clients replace the streamed text with it |
@@ -124,27 +125,35 @@ bootstrap confidence intervals.
 | `[MODEL_INFO]{json}` | Who answered, e.g. `{"provider":"openrouter","model":"openai/gpt-oss-120b","fallback":true}` |
 | `[DONE]` | End of stream |
 
-**Backup provider.** When Groq answers 429 (rate limit) or 5xx, or can't be reached, the same
-request goes to OpenRouter right away, without waiting for Groq's `Retry-After`. The backup is an
-agno `OpenRouter` agent with the same tools and instructions. It tries `OPENROUTER_MODEL` first,
-then each model in `OPENROUTER_FALLBACK_MODELS`. Streams send
-`[STATUS] Groq busy — switched to backup model`, and the UI labels the answer "via backup".
-`/api/chat` returns `llm_provider`, `llm_model` and `llm_fallback`. `/api/health` shows the
-fallback config (`fallback`) and who answered last (`last_llm`). The backups are tried once per
-question. If they all fail, the normal Groq retries below take over. Other errors, such as a
-400, don't trigger the fallback. It is on whenever `OPENROUTER_API_KEY` is set;
-`FALLBACK_PROVIDER=none` turns it off.
+**Primary and backup models.** `LLM_PROVIDER` picks the primary. It defaults to `openrouter`
+when `OPENROUTER_API_KEY` is set and to `groq` otherwise. When the primary answers 429 (rate
+limit) or 5xx, times out or can't be reached, the same request moves to the next backup right
+away, without waiting for `Retry-After`:
+
+| Primary | Backup chain, in order |
+|---|---|
+| `openrouter` (`OPENROUTER_MODEL`) | each model in `OPENROUTER_FALLBACK_MODELS`, then Groq `GROQ_MODEL` if `GROQ_API_KEY` is set |
+| `groq` (`GROQ_MODEL`) | OpenRouter `OPENROUTER_MODEL`, then each model in `OPENROUTER_FALLBACK_MODELS` |
+| `ollama` | none (falls back to Groq only if Ollama is unreachable at startup) |
+
+Each backup is an agno agent with the same tools and instructions. Streams send
+`[STATUS] Primary model busy — switched to backup model`, and the UI labels the answer
+"via backup · <model>". `/api/chat` returns `llm_provider`, `llm_model` and `llm_fallback`.
+`/api/health` shows the primary (`llm_provider`, `llm_model`), the backup chain (`fallback`)
+and who answered last (`last_llm`). The backups are tried once per question. If they all fail,
+the normal retries below take over on the primary. Other errors, such as a 400, don't trigger
+the fallback. `FALLBACK_PROVIDER=none` turns the chain off.
 
 If generation fails before any text is sent, the server retries up to `LLM_MAX_RETRIES` times
-(default 2), sending a `[STATUS]` event before each wait. On Groq 429s it waits for the
-`Retry-After` the API suggests (capped by `LLM_RETRY_MAX_DELAY`); the Groq SDK's own silent
+(default 2), sending a `[STATUS]` event before each wait. On 429s it waits for the
+`Retry-After` the API suggests (capped by `LLM_RETRY_MAX_DELAY`); the SDKs' own silent
 retries are disabled. When retries run out, a clear `[ERROR]` follows. It never retries after
 partial output, because that would duplicate text. The UI never re-asks via `/api/chat`, so
-each question costs at most `1 + LLM_MAX_RETRIES` Groq runs, plus one run per backup model.
+each question costs at most `1 + LLM_MAX_RETRIES` primary runs, plus one run per backup model.
 
 | Layer | Technology |
 |---|---|
-| LLM | Groq `openai/gpt-oss-120b` (default; `openai/gpt-oss-20b` is fastest) or Ollama `qwen2.5:3b`; OpenRouter free models as the automatic backup |
+| LLM | OpenRouter `openai/gpt-oss-120b` (paid; default when its key is set), Groq `openai/gpt-oss-120b` (`openai/gpt-oss-20b` is fastest) or Ollama `qwen2.5:3b`; automatic backup chain (`google/gemini-2.5-flash`, then Groq) |
 | Agent framework | agno 1.8.4 |
 | API | FastAPI + uvicorn, SSE streaming, SQLite |
 | NLP | spaCy `en_core_web_sm`, VADER, scikit-learn TF-IDF + LogReg |
@@ -159,8 +168,10 @@ each question costs at most `1 + LLM_MAX_RETRIES` Groq runs, plus one run per ba
 
 - Python **3.12+**
 - Node.js **20+** (CI and Docker use 22)
-- A [Groq API key](https://console.groq.com/) (free tier available), **or** a local
-  [Ollama](https://ollama.com/) install
+- An [OpenRouter API key](https://openrouter.ai/) (paid), a
+  [Groq API key](https://console.groq.com/) (free tier available), **or** a local
+  [Ollama](https://ollama.com/) install. With both keys, OpenRouter is primary and Groq is the
+  last backup.
 
 ### 1. Backend
 
@@ -177,7 +188,7 @@ pip install torch==2.14.1 --index-url https://download.pytorch.org/whl/cpu
 pip install -r requirements-dev.txt    # runtime + test deps (requirements.txt = runtime only)
 python -m spacy download en_core_web_sm
 
-cp .env.example .env                   # then set GROQ_API_KEY (or LLM_PROVIDER=ollama)
+cp .env.example .env                   # then set OPENROUTER_API_KEY and/or GROQ_API_KEY (or LLM_PROVIDER=ollama)
 python api.py                          # → http://localhost:8001  (PORT to change)
 ```
 
@@ -205,7 +216,7 @@ python api.py                          # serves the SPA from frontend/dist at ht
 ### Docker
 
 ```bash
-cp .env.example .env                   # set GROQ_API_KEY
+cp .env.example .env                   # set OPENROUTER_API_KEY and/or GROQ_API_KEY
 docker compose up --build              # → http://localhost:8001
 ```
 
@@ -215,7 +226,7 @@ different models, use `--build-arg SPACY_MODEL=… --build-arg EMBEDDING_MODEL=�
 reports are kept in `./outputs`, and the SQLite database in the `financial-ai-agent-data`
 volume.
 
-### Using Ollama instead of Groq
+### Using Ollama instead of a cloud LLM
 
 ```bash
 ollama pull qwen2.5:3b
@@ -239,15 +250,16 @@ All settings are environment variables, read in `config.py`. `.env` is loaded wi
 
 | Variable | Default | Description |
 |---|---|---|
-| `LLM_PROVIDER` | `groq` | `groq` or `ollama` |
-| `GROQ_API_KEY` | (unset) | **Secret.** Needed for Groq. Without it the server still starts, `/api/health` reports `degraded`, and chat returns 503 |
+| `LLM_PROVIDER` | `openrouter` if `OPENROUTER_API_KEY` is set, else `groq` | Primary LLM: `openrouter`, `groq` or `ollama` |
+| `OPENROUTER_API_KEY` | (unset) | **Secret.** Makes OpenRouter the default primary, and turns on the backup chain |
+| `OPENROUTER_MODEL` | `openai/gpt-oss-120b` | OpenRouter primary model (paid, tool calling tested). With a Groq primary, the first backup |
+| `GROQ_API_KEY` | (unset) | **Secret.** Needed when Groq is primary; with an OpenRouter primary it adds Groq as the last backup. Without a key for the primary the server still starts, `/api/health` reports `degraded`, and chat returns 503 |
 | `GROQ_MODEL` | `openai/gpt-oss-120b` | Groq model id. `openai/gpt-oss-20b` is the fastest; `qwen/qwen3.8-27b` is also supported |
 | `LLM_MAX_RETRIES` | `2` | Retries after the first attempt when the LLM fails before any text (e.g. 429). Each retry is announced to the UI |
-| `LLM_RETRY_MAX_DELAY` | `20` | Longest wait (seconds) before a retry, even if Groq's `Retry-After` is longer |
-| `OPENROUTER_API_KEY` | (unset) | **Secret.** Turns on the automatic backup used when Groq is rate-limited or down |
-| `FALLBACK_PROVIDER` | `openrouter` if `OPENROUTER_API_KEY` is set, else `none` | Backup LLM provider. `none` disables it |
-| `OPENROUTER_MODEL` | `openai/gpt-oss-120b` | First backup model (tool calling tested) |
-| `OPENROUTER_FALLBACK_MODELS` | `google/gemini-2.5-flash` | Comma-separated models tried in order if the previous one errors or returns 429. Empty means none |
+| `LLM_RETRY_MAX_DELAY` | `20` | Longest wait (seconds) before a retry, even if the provider's `Retry-After` is longer |
+| `FALLBACK_PROVIDER` | `openrouter` if `OPENROUTER_API_KEY` is set, else `none` | `none` disables the whole backup chain |
+| `OPENROUTER_FALLBACK_MODELS` | `google/gemini-2.5-flash` | Comma-separated OpenRouter backups tried in order if the previous model errors, times out or returns 429. Empty means none |
+| `OPENROUTER_TIMEOUT_SECONDS` | `30` | Seconds before an OpenRouter request (primary or backup) is abandoned and the next backup is tried |
 | `AGENT_TOOL_CALL_LIMIT` | `3` | Max tool calls per answer; every tool round is another full model call |
 | `TOOL_OUTPUT_MAX_CHARS` | `2000` | Tool results are truncated to this many characters before the model sees them |
 | `CACHE_TTL_SECONDS` | `60` | Thread-safe TTL cache for yfinance data and tool results, per ticker + function. `0` disables it |
@@ -271,7 +283,7 @@ Frontend (build-time, `frontend/.env`): `VITE_API_URL` (default `/api`) and
 `VITE_OUTPUTS_URL` (default `/outputs`). Set both when the API runs on a different origin.
 Both are public: anything `VITE_*` ends up in the browser bundle, so never put secrets there.
 
-**OpenRouter (paid backup).** Defaults are paid models with tested tool calling: `openai/gpt-oss-120b` (~$0.15/$0.60 per 1M input/output tokens) then `google/gemini-2.5-flash` (~$0.30/$2.50). A backup answer costs roughly $0.001–0.003. Paid models have no daily request cap (rate limits scale with credits). Every tool round of an answer is a separate request. Avoid `:free` models: they are capped (50–1000/day) and often rate-limited upstream.
+**OpenRouter (paid).** Defaults are paid models with tested tool calling: `openai/gpt-oss-120b` as primary (~$0.15/$0.60 per 1M input/output tokens) then `google/gemini-2.5-flash` as backup (~$0.30/$2.50). An answer costs roughly $0.001–0.003. Paid models have no daily request cap (rate limits scale with credits). Every tool round of an answer is a separate request. Avoid `:free` models: they are capped (50–1000/day) and often rate-limited upstream.
 
 **Secrets.** Only `GROQ_API_KEY`, `OPENROUTER_API_KEY` and `API_KEY` are secret. Keep them in `.env` (git-ignored
 and excluded from the Docker build context) or in your platform's secret store, and pass
@@ -294,8 +306,8 @@ npm run lint && npm run build
 
 The backend tests use a temporary SQLite database. `tests/conftest.py` sets `DATABASE_PATH`
 before importing the app, and `persistence.reset_for_tests()` refuses to touch the default
-DB. The tests also remove `GROQ_API_KEY` and the OpenRouter settings, mock the LLM (including
-the fallback), and stub live market data.
+DB. The tests also remove `LLM_PROVIDER`, `GROQ_API_KEY` and the OpenRouter settings, mock the
+LLM (including both fallback chains), and stub live market data.
 
 Coverage includes:
 
@@ -351,7 +363,7 @@ Session ids must match `^[A-Za-z0-9_-]{1,64}$`.
 
 | Method & path | Purpose |
 |---|---|
-| `GET /api/health` | Status (`ok` / `degraded`), LLM provider and config, backup (`fallback`) config, who answered last (`last_llm`), NLP availability |
+| `GET /api/health` | Status (`ok` / `degraded`), primary LLM (`llm_provider`, `llm_model`, `llm_configured`), backup chain (`fallback.chain`), who answered last (`last_llm`), NLP availability |
 | `GET /api/stats` | In-process usage counters (reset on restart) |
 | `POST /api/chat` | Non-streaming chat → `{response, session_id, nlp_metadata, structured_response, llm_provider, llm_model, llm_fallback}` |
 | `POST /api/chat/stream` | Streaming chat (SSE, see the protocol above) |
@@ -375,7 +387,7 @@ the session cache, rate limits and stats live in process memory.
 
 - **Render / Railway / Fly.io / Azure Container Apps / App Service (container):** build from
   the `Dockerfile`. Then:
-  - set `GROQ_API_KEY`, set `FORWARDED_ALLOW_IPS=*` (the platform proxy sets `X-Forwarded-For`),
+  - set `OPENROUTER_API_KEY` and/or `GROQ_API_KEY`, set `FORWARDED_ALLOW_IPS=*` (the platform proxy sets `X-Forwarded-For`),
     and set `CORS_ORIGINS` if the frontend is hosted elsewhere
   - mount a persistent disk at `/app/data` (and optionally `/app/outputs`)
   - the image listens on `$PORT` (default 8001), which most platforms inject automatically

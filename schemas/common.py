@@ -21,12 +21,25 @@ SESSION_ID_MAX_LENGTH = 64
 
 
 # ── Health ───────────────────────────────────────────────────────────
-class FallbackStatus(BaseModel):
-    """Backup LLM used when Groq is rate-limited or unavailable."""
+class FallbackModel(BaseModel):
+    """One step of the backup chain."""
 
-    provider: str = Field(default="none", description='"openrouter" or "none" (disabled).')
+    provider: str
+    model: str
+
+
+class FallbackStatus(BaseModel):
+    """Backup models used when the primary LLM is rate-limited or unavailable."""
+
+    provider: str = Field(
+        default="none",
+        description='Backup provider(s), e.g. "openrouter", "openrouter,groq"; "none" = disabled.',
+    )
     configured: bool = False
     models: list[str] = Field(default_factory=list, description="Backup models, tried in order.")
+    chain: list[FallbackModel] = Field(
+        default_factory=list, description="Backup provider/model pairs, tried in order."
+    )
     detail: str | None = None
 
 
@@ -43,10 +56,12 @@ class HealthResponse(BaseModel):
     """Response body for ``GET /api/health``."""
 
     status: str = Field(default="ok", description='"ok", or "degraded" when no LLM is usable.')
-    llm_provider: str = "groq"
-    llm_configured: bool = False
+    llm_provider: str = Field(default="groq", description="Primary provider.")
+    llm_model: str | None = Field(default=None, description="Primary model id.")
+    llm_configured: bool = Field(default=False, description="True when the primary is usable.")
     detail: str | None = Field(default=None, description="Why the service is degraded.")
     groq_configured: bool = False
+    openrouter_configured: bool = False
     fallback: FallbackStatus = Field(default_factory=FallbackStatus)
     last_llm: LastLLMUsage | None = Field(
         default=None, description="Who answered last (null until the first answer)."

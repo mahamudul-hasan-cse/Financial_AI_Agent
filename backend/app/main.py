@@ -31,7 +31,7 @@ def create_app() -> FastAPI:
     configure_logging()
     app = FastAPI(
         title="Financial AI Agent API",
-        description="NLP-enriched financial research assistant (Groq/Ollama + agno).",
+        description="NLP-enriched financial research assistant (OpenRouter/Groq/Ollama + agno).",
         version="1.1.0",
     )
     install_middleware(app)

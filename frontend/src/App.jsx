@@ -442,7 +442,7 @@ export default function App() {
                             {message.modelInfo?.fallback && (
                               <span
                                 className="message-model"
-                                title={`Groq was busy, so ${message.modelInfo.provider} answered`}
+                                title={`Primary model was busy, so ${message.modelInfo.provider} answered`}
                               >via backup · {message.modelInfo.model || message.modelInfo.provider}</span>
                             )}
                             {message.content && !isStreaming && (

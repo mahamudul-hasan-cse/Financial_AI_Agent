@@ -2,7 +2,7 @@
 # Financial AI Agent — Docker Compose
 # =============================================================================
 #
-# Default (Groq cloud LLM):
+# Default (cloud LLM: OpenRouter when OPENROUTER_API_KEY is set, else Groq):
 #   docker compose up --build
 #
 # With local Ollama LLM:

@@ -74,7 +74,7 @@ describe('App streaming', () => {
         return new Response(JSON.stringify({ sessions: [] }), { status: 200 })
       }
       return streamResponse([
-        'data: [STATUS]{"type":"status","message":"Groq busy — switched to backup model"}\n\n',
+        'data: [STATUS]{"type":"status","message":"Primary model busy — switched to backup model"}\n\n',
         'data: "Backup answer"\n\n',
         'data: [FINAL]"Backup answer"\n\n',
         'data: [MODEL_INFO]{"provider":"openrouter","model":"google/gemini-2.5-flash","fallback":true}\n\n',

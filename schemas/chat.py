@@ -63,12 +63,12 @@ class ChatResponse(BaseModel):
     )
     llm_provider: str | None = Field(
         default=None,
-        description='LLM provider that answered: "groq", "openrouter" (backup) or "ollama".',
+        description='LLM provider that answered: "openrouter", "groq" or "ollama".',
     )
     llm_model: str | None = Field(default=None, description="Model id that answered.")
     llm_fallback: bool = Field(
         default=False,
-        description="True when Groq was busy/down and a backup model answered.",
+        description="True when the primary model was busy/down and a backup model answered.",
     )
 
 

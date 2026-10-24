@@ -80,9 +80,9 @@ ARG SPACY_MODEL
 ARG EMBEDDING_MODEL
 
 LABEL org.opencontainers.image.title="Financial AI Agent"
-LABEL org.opencontainers.image.description="FastAPI + Groq/Ollama LLM + React — full-stack financial assistant"
+LABEL org.opencontainers.image.description="FastAPI + OpenRouter/Groq/Ollama LLM + React — full-stack financial assistant"
 
-# curl: HEALTHCHECK · ca-certificates: TLS to Groq / Yahoo / DuckDuckGo
+# curl: HEALTHCHECK · ca-certificates: TLS to OpenRouter / Groq / Yahoo / DuckDuckGo
 RUN apt-get update \
  && apt-get install -y --no-install-recommends curl ca-certificates \
  && rm -rf /var/lib/apt/lists/*

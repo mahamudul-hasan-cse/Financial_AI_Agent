@@ -6,7 +6,7 @@ from fastapi import APIRouter
 
 from backend.app.agent.financial_agent import fallback_status, get_agent_service, llm_status
 from backend.app.state import _stats, sessions
-from config import get_groq_api_key
+from config import get_groq_api_key, get_openrouter_api_key
 from schemas import (
     FallbackStatus,
     HealthResponse,
@@ -28,9 +28,11 @@ def health() -> HealthResponse:
     return HealthResponse(
         status="ok" if llm["configured"] else "degraded",
         llm_provider=llm["provider"],
+        llm_model=llm["model"],
         llm_configured=llm["configured"],
         detail=llm["detail"],
         groq_configured=bool(get_groq_api_key()),
+        openrouter_configured=bool(get_openrouter_api_key()),
         fallback=FallbackStatus(**fallback_status()),
         last_llm=LastLLMUsage(**last_used) if last_used else None,
         active_sessions=len(sessions),

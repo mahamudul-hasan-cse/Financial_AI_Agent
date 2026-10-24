@@ -5,8 +5,8 @@ SSE protocol (``POST /api/chat/stream``), one ``data:`` line per event:
 * ``[NLP_META]{json}``      – NLP analysis of the question (always first)
 * ``[STATUS]{json}``        – transient progress, e.g. a rate-limit retry:
   ``{"type": "status", "message": "Rate limit reached — retrying in 4s…"}``
-  or a switch to the backup provider (``"Groq busy — switched to backup
-  model"``).  Sent only before any answer text; may repeat.
+  or a switch to a backup model (``"Primary model busy — switched to
+  backup model"``).  Sent only before any answer text; may repeat.
 * ``"<json string>"``       – a chunk of answer text (JSON-encoded so
   newlines survive SSE framing)
 * ``[ERROR] <message>``     – generation failed; the message is user-facing
