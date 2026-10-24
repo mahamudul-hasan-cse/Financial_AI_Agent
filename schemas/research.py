@@ -36,6 +36,27 @@ class ExplainabilityItem(BaseModel):
     value: str
 
 
+class QuotePoint(BaseModel):
+    """One daily close (ISO date) in a quote's sparkline series."""
+
+    date: str
+    close: float
+
+
+class StockQuote(BaseModel):
+    """Live quote for the answer's main ticker (real market data only)."""
+
+    symbol: str
+    company_name: str | None = None
+    price: float
+    change: float | None = None
+    change_pct: float | None = None
+    currency: str | None = None
+    closes: list[QuotePoint] = Field(
+        default_factory=list, description="Daily closes over ~1 month, oldest first."
+    )
+
+
 class ResearchResponse(BaseModel):
     """Structured response returned alongside the raw agent text."""
 
@@ -47,6 +68,7 @@ class ResearchResponse(BaseModel):
     intent: str = "general"
     summary_markdown: str | None = None
     metrics: list[ResearchMetric] = Field(default_factory=list)
+    quote: StockQuote | None = None
     news_signals: list[ResearchSignal] = Field(default_factory=list)
     risks: list[ResearchSignal] = Field(default_factory=list)
     next_actions: list[str] = Field(default_factory=list)

@@ -36,6 +36,15 @@ def _format_number(value: Any) -> str:
     return f"{num:.2f}" if not float(num).is_integer() else f"{int(num)}"
 
 
+def _fast_info_attr(fast_info: Any, name: str) -> Any:
+    """Read a lazy yfinance ``fast_info`` field; its getters can raise on bad data."""
+
+    try:
+        return getattr(fast_info, name, None)
+    except Exception:
+        return None
+
+
 def extract_symbols_from_entities(entities: list[Any]) -> list[str]:
     """Return deduplicated ticker symbols from NLP entities."""
 
@@ -87,8 +96,17 @@ def get_market_context(symbol: str) -> dict[str, Any]:
     if price is not None and prev_close not in (None, 0):
         change_pct = round(((price - prev_close) / prev_close) * 100, 2)
 
+    change = None
+    if price is not None and prev_close is not None:
+        change = round(price - prev_close, 2)
+
     chart = []
+    closes = []
     if history is not None and not history.empty:
+        for idx, row in history.iterrows():
+            close = _safe_float(row.get("Close"))
+            if close is not None:
+                closes.append({"date": idx.strftime("%Y-%m-%d"), "close": round(close, 4)})
         tail = history.tail(10)
         for idx, row in tail.iterrows():
             close = _safe_float(row.get("Close"))
@@ -106,7 +124,10 @@ def get_market_context(symbol: str) -> dict[str, Any]:
         "symbol": symbol.upper(),
         "company_name": info.get("shortName") or info.get("longName") or symbol.upper(),
         "price": price,
+        "prev_close": prev_close,
+        "change": change,
         "change_pct": change_pct,
+        "currency": info.get("currency") or _fast_info_attr(fast_info, "currency"),
         "week_change_pct": week_change_pct,
         "recommendation": info.get("recommendationKey"),
         "analyst_view": info.get("recommendationMean"),
@@ -121,6 +142,8 @@ def get_market_context(symbol: str) -> dict[str, Any]:
         ],
         "headlines": get_recent_headlines(symbol),
         "chart": chart,
+        # Every daily close of the last month (oldest first), for sparklines.
+        "closes": closes,
         "sources": [
             {"label": "Yahoo Finance Quote", "kind": "market_data"},
             {"label": "Yahoo Finance News", "kind": "news"},

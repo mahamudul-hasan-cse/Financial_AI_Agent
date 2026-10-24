@@ -69,6 +69,7 @@ def build_structured_response(
     symbols = extract_symbols_from_entities(nlp_meta.entities if hasattr(nlp_meta, "entities") else [])
     symbol = symbols[0] if symbols else None
     market = None
+    quote = None
     company_name = None
     metrics = []
     news_signals = []
@@ -100,6 +101,16 @@ def build_structured_response(
 
     if market:
         company_name = market["company_name"]
+        if market.get("price") is not None:
+            quote = {
+                "symbol": market["symbol"],
+                "company_name": company_name,
+                "price": market["price"],
+                "change": market.get("change"),
+                "change_pct": market.get("change_pct"),
+                "currency": market.get("currency"),
+                "closes": market.get("closes") or [],
+            }
         metrics = [
             {"label": "Current Price", "value": f"${market['price']:.2f}" if market["price"] is not None else "n/a", "tone": "neutral"},
             {"label": "Today", "value": f"{market['change_pct']:+.2f}%" if market["change_pct"] is not None else "n/a", "tone": "positive" if (market["change_pct"] or 0) >= 0 else "negative"},
@@ -158,6 +169,7 @@ def build_structured_response(
         "intent": intent,
         "summary_markdown": raw_content,
         "metrics": metrics,
+        "quote": quote,
         "news_signals": news_signals,
         "risks": risks,
         "next_actions": _default_next_actions(intent, symbol),
