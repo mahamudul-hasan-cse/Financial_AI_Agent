@@ -61,9 +61,5 @@ class StreamEventDone(BaseModel):
 
 # Discriminated union of all SSE event types.
 StreamEvent = (
-    StreamEventNLPMeta
-    | StreamEventChunk
-    | StreamEventError
-    | StreamEventResearch
-    | StreamEventDone
+    StreamEventNLPMeta | StreamEventChunk | StreamEventError | StreamEventResearch | StreamEventDone
 )

@@ -31,7 +31,6 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
-from collections import Counter
 from typing import NamedTuple
 
 import numpy as np
@@ -44,6 +43,7 @@ logger = logging.getLogger("rag_tools")
 # ── Embedding backends ────────────────────────────────────────────────────────
 try:
     from sentence_transformers import SentenceTransformer
+
     DENSE_AVAILABLE = True
 except ImportError:
     DENSE_AVAILABLE = False
@@ -78,9 +78,11 @@ def _embedding_dim(model: "SentenceTransformer") -> int | None:
     )
     return getter()
 
+
 try:
     from sklearn.feature_extraction.text import TfidfVectorizer
     from sklearn.metrics.pairwise import cosine_similarity as _sk_cosine
+
     SPARSE_AVAILABLE = True
 except Exception:
     SPARSE_AVAILABLE = False
@@ -138,85 +140,102 @@ def expand_query(query: str) -> str:
 # Each chunk has an ID for citation purposes.
 _KNOWLEDGE_BASE: list[dict[str, str]] = [
     # Valuation
-    {"id": "KB001", "text":
-    "The Price-to-Earnings (P/E) ratio divides a stock's current share price by "
-    "its earnings per share. A high P/E may signal growth expectations; a low P/E "
-    "can indicate undervaluation or declining business prospects."},
-
-    {"id": "KB002", "text":
-    "Forward P/E uses projected future earnings rather than trailing (past 12 months) "
-    "earnings. Analysts prefer forward P/E when evaluating growth stocks."},
-
-    {"id": "KB003", "text":
-    "Enterprise Value (EV) equals market capitalisation plus total debt minus cash. "
-    "EV/EBITDA is widely used for comparing companies regardless of capital structure."},
-
+    {
+        "id": "KB001",
+        "text": "The Price-to-Earnings (P/E) ratio divides a stock's current share price by "
+        "its earnings per share. A high P/E may signal growth expectations; a low P/E "
+        "can indicate undervaluation or declining business prospects.",
+    },
+    {
+        "id": "KB002",
+        "text": "Forward P/E uses projected future earnings rather than trailing (past 12 months) "
+        "earnings. Analysts prefer forward P/E when evaluating growth stocks.",
+    },
+    {
+        "id": "KB003",
+        "text": "Enterprise Value (EV) equals market capitalisation plus total debt minus cash. "
+        "EV/EBITDA is widely used for comparing companies regardless of capital structure.",
+    },
     # Dividends
-    {"id": "KB004", "text":
-    "Dividend yield is the annual dividend per share divided by the current share price. "
-    "High dividend yields can attract income investors but may also signal a falling stock price."},
-
-    {"id": "KB005", "text":
-    "A dividend payout ratio above 80% may be unsustainable; companies with strong "
-    "free cash flow can safely sustain higher ratios."},
-
+    {
+        "id": "KB004",
+        "text": "Dividend yield is the annual dividend per share divided by the current share price. "
+        "High dividend yields can attract income investors but may also signal a falling stock price.",
+    },
+    {
+        "id": "KB005",
+        "text": "A dividend payout ratio above 80% may be unsustainable; companies with strong "
+        "free cash flow can safely sustain higher ratios.",
+    },
     # Market concepts
-    {"id": "KB006", "text":
-    "Beta measures a stock's volatility relative to the market. Beta > 1 means more "
-    "volatile than the index; Beta < 1 means less volatile. Negative beta stocks tend "
-    "to move opposite to the market (e.g. gold miners)."},
-
-    {"id": "KB007", "text":
-    "Market capitalisation is share price × shares outstanding. Classifications: "
-    "large-cap (> $10B), mid-cap ($2B–$10B), small-cap ($300M–$2B), micro-cap (< $300M)."},
-
+    {
+        "id": "KB006",
+        "text": "Beta measures a stock's volatility relative to the market. Beta > 1 means more "
+        "volatile than the index; Beta < 1 means less volatile. Negative beta stocks tend "
+        "to move opposite to the market (e.g. gold miners).",
+    },
+    {
+        "id": "KB007",
+        "text": "Market capitalisation is share price × shares outstanding. Classifications: "
+        "large-cap (> $10B), mid-cap ($2B–$10B), small-cap ($300M–$2B), micro-cap (< $300M).",
+    },
     # Technical analysis
-    {"id": "KB008", "text":
-    "The 50-day and 200-day moving averages are widely watched trend indicators. "
-    "A 'golden cross' (50-day crossing above 200-day) is a bullish signal; a "
-    "'death cross' (50-day crossing below 200-day) is bearish."},
-
-    {"id": "KB009", "text":
-    "RSI (Relative Strength Index) ranges from 0–100. Above 70 indicates overbought "
-    "conditions; below 30 suggests oversold. RSI is a momentum oscillator."},
-
+    {
+        "id": "KB008",
+        "text": "The 50-day and 200-day moving averages are widely watched trend indicators. "
+        "A 'golden cross' (50-day crossing above 200-day) is a bullish signal; a "
+        "'death cross' (50-day crossing below 200-day) is bearish.",
+    },
+    {
+        "id": "KB009",
+        "text": "RSI (Relative Strength Index) ranges from 0–100. Above 70 indicates overbought "
+        "conditions; below 30 suggests oversold. RSI is a momentum oscillator.",
+    },
     # Earnings
-    {"id": "KB010", "text":
-    "Earnings Per Share (EPS) = net income ÷ diluted shares outstanding. "
-    "Beat or miss relative to analyst consensus EPS estimates typically drives "
-    "significant post-earnings stock moves."},
-
-    {"id": "KB011", "text":
-    "Revenue growth rate = (current quarter revenue − prior year quarter revenue) / "
-    "prior year quarter revenue × 100. Consistent double-digit growth signals a strong business."},
-
+    {
+        "id": "KB010",
+        "text": "Earnings Per Share (EPS) = net income ÷ diluted shares outstanding. "
+        "Beat or miss relative to analyst consensus EPS estimates typically drives "
+        "significant post-earnings stock moves.",
+    },
+    {
+        "id": "KB011",
+        "text": "Revenue growth rate = (current quarter revenue − prior year quarter revenue) / "
+        "prior year quarter revenue × 100. Consistent double-digit growth signals a strong business.",
+    },
     # Risk
-    {"id": "KB012", "text":
-    "Diversification reduces unsystematic (company-specific) risk but cannot eliminate "
-    "systematic (market-wide) risk. Modern Portfolio Theory formalises this with the "
-    "efficient frontier."},
-
-    {"id": "KB013", "text":
-    "Short interest as a percentage of float above 20% is considered high and can "
-    "lead to a short squeeze if the stock rises sharply."},
-
+    {
+        "id": "KB012",
+        "text": "Diversification reduces unsystematic (company-specific) risk but cannot eliminate "
+        "systematic (market-wide) risk. Modern Portfolio Theory formalises this with the "
+        "efficient frontier.",
+    },
+    {
+        "id": "KB013",
+        "text": "Short interest as a percentage of float above 20% is considered high and can "
+        "lead to a short squeeze if the stock rises sharply.",
+    },
     # Analyst ratings
-    {"id": "KB014", "text":
-    "Analyst consensus ratings range from Strong Buy → Buy → Hold → Underperform → Sell. "
-    "Price targets represent analysts' 12-month expected share price. A large gap between "
-    "the current price and the average target suggests significant upside or downside."},
-
+    {
+        "id": "KB014",
+        "text": "Analyst consensus ratings range from Strong Buy → Buy → Hold → Underperform → Sell. "
+        "Price targets represent analysts' 12-month expected share price. A large gap between "
+        "the current price and the average target suggests significant upside or downside.",
+    },
     # Sectors
-    {"id": "KB015", "text":
-    "The S&P 500 is divided into 11 GICS sectors: Information Technology, Health Care, "
-    "Financials, Consumer Discretionary, Communication Services, Industrials, Consumer "
-    "Staples, Energy, Utilities, Real Estate, and Materials."},
-
+    {
+        "id": "KB015",
+        "text": "The S&P 500 is divided into 11 GICS sectors: Information Technology, Health Care, "
+        "Financials, Consumer Discretionary, Communication Services, Industrials, Consumer "
+        "Staples, Energy, Utilities, Real Estate, and Materials.",
+    },
     # Interest rates
-    {"id": "KB016", "text":
-    "Rising interest rates increase the discount rate applied to future cash flows, "
-    "which reduces the present value of growth stocks more than value stocks. "
-    "This is why tech stocks are sensitive to Fed policy."},
+    {
+        "id": "KB016",
+        "text": "Rising interest rates increase the discount rate applied to future cash flows, "
+        "which reduces the present value of growth stocks more than value stocks. "
+        "This is why tech stocks are sensitive to Fed policy.",
+    },
 ]
 
 # Plain text list for backward compatibility
@@ -247,8 +266,8 @@ def _keyword_overlap_score(query: str, document: str) -> float:
     Returns:
         Float score in [0, 1] representing keyword overlap.
     """
-    q_tokens = set(re.findall(r'\w+', query.lower()))
-    d_tokens = set(re.findall(r'\w+', document.lower()))
+    q_tokens = set(re.findall(r"\w+", query.lower()))
+    d_tokens = set(re.findall(r"\w+", document.lower()))
     if not q_tokens or not d_tokens:
         return 0.0
     intersection = q_tokens & d_tokens
@@ -300,11 +319,14 @@ class RAGRetriever:
                     if cache_file.exists():
                         self._dense_index = np.load(str(cache_file))
                         expected_dim = _embedding_dim(model)
-                        if (self._dense_index.shape[0] == len(self.documents)
-                                and self._dense_index.shape[1] == expected_dim):
+                        if (
+                            self._dense_index.shape[0] == len(self.documents)
+                            and self._dense_index.shape[1] == expected_dim
+                        ):
                             logger.info(
                                 "Loaded cached embeddings for %d chunks from %s",
-                                len(self.documents), cache_file.name,
+                                len(self.documents),
+                                cache_file.name,
                             )
                             return
                         # Shape mismatch (document count or embedding dim) — recompute
@@ -320,7 +342,8 @@ class RAGRetriever:
                         np.save(str(cache_file), self._dense_index)
                         logger.info(
                             "Cached %d chunk embeddings to %s",
-                            len(self.documents), cache_file.name,
+                            len(self.documents),
+                            cache_file.name,
                         )
                     except Exception:
                         pass  # non-critical — just skip caching
@@ -331,7 +354,9 @@ class RAGRetriever:
             self._tfidf = TfidfVectorizer(stop_words="english", ngram_range=(1, 2))
             self._tfidf_matrix = self._tfidf.fit_transform(self.documents)
 
-    def retrieve(self, query: str, top_k: int = 3, use_reranking: bool = True, use_expansion: bool = True) -> list[RetrievedChunk]:
+    def retrieve(
+        self, query: str, top_k: int = 3, use_reranking: bool = True, use_expansion: bool = True
+    ) -> list[RetrievedChunk]:
         """Retrieve the top-k most relevant document chunks for a query.
 
         Pipeline: query expansion → initial retrieval → re-ranking.
@@ -458,9 +483,17 @@ class RAGTools(Toolkit):
         if not chunks:
             return "No relevant context found in the knowledge base for this query."
 
-        backend = "dense (sentence-transformers)" if self._retriever._dense_index is not None else "sparse (TF-IDF)"
-        lines = [f"Retrieved {len(chunks)} relevant chunks via {backend} (with query expansion + re-ranking):\n"]
+        backend = (
+            "dense (sentence-transformers)"
+            if self._retriever._dense_index is not None
+            else "sparse (TF-IDF)"
+        )
+        lines = [
+            f"Retrieved {len(chunks)} relevant chunks via {backend} (with query expansion + re-ranking):\n"
+        ]
         for i, chunk in enumerate(chunks, 1):
-            lines.append(f"[{i}] [Source: {chunk.chunk_id}] (score={chunk.score:.3f})\n{chunk.text}\n")
+            lines.append(
+                f"[{i}] [Source: {chunk.chunk_id}] (score={chunk.score:.3f})\n{chunk.text}\n"
+            )
 
         return "\n".join(lines)

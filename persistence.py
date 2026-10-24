@@ -36,8 +36,7 @@ def init_db() -> None:
     """Create required tables if they do not already exist."""
 
     with _db_lock, _conn:
-        _conn.executescript(
-            """
+        _conn.executescript("""
             CREATE TABLE IF NOT EXISTS sessions (
                 session_id TEXT PRIMARY KEY,
                 client_id TEXT,
@@ -85,8 +84,7 @@ def init_db() -> None:
 
             CREATE INDEX IF NOT EXISTS idx_alerts_session
             ON alerts (session_id);
-            """
-        )
+            """)
         # Migration: databases created before client ownership existed.
         columns = {row["name"] for row in _conn.execute("PRAGMA table_info(sessions)")}
         if "client_id" not in columns:
@@ -241,7 +239,9 @@ def get_session(session_id: str) -> dict[str, Any] | None:
                 "role": row["role"],
                 "content": row["content"],
                 "timestamp": row["timestamp"],
-                "nlp_metadata": json.loads(row["nlp_metadata_json"]) if row["nlp_metadata_json"] else None,
+                "nlp_metadata": (
+                    json.loads(row["nlp_metadata_json"]) if row["nlp_metadata_json"] else None
+                ),
                 "structured_response": (
                     json.loads(row["structured_response_json"])
                     if row["structured_response_json"]
@@ -292,8 +292,7 @@ def append_message(
                 (session_id,),
             ).fetchall()
             current_messages = [
-                {"role": row["role"], "content": row["content"]}
-                for row in user_rows
+                {"role": row["role"], "content": row["content"]} for row in user_rows
             ]
             title = _session_title_from_messages(current_messages)
             _conn.execute(
@@ -429,7 +428,9 @@ def get_alert(alert_id: int) -> dict[str, Any]:
     return item
 
 
-def update_alert(alert_id: int, *, enabled: bool | None = None, label: str | None = None) -> dict[str, Any]:
+def update_alert(
+    alert_id: int, *, enabled: bool | None = None, label: str | None = None
+) -> dict[str, Any]:
     """Update alert fields and return the updated row."""
 
     current = get_alert(alert_id)  # acquires the (non-reentrant) lock itself

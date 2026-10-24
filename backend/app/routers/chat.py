@@ -148,7 +148,7 @@ def chat_stream(req: ChatRequest, request: Request, client_id: ClientId) -> Stre
             # Retries (and their [STATUS] notices) happen inside service.stream().
             for text in service.stream(prompt, session_id=session_id):
                 if text.startswith(chat_service.STATUS_PREFIX):
-                    message = text[len(chat_service.STATUS_PREFIX):].strip()
+                    message = text[len(chat_service.STATUS_PREFIX) :].strip()
                     yield _sse(
                         chat_service.STATUS_PREFIX
                         + json.dumps({"type": "status", "message": message})
@@ -156,7 +156,7 @@ def chat_stream(req: ChatRequest, request: Request, client_id: ClientId) -> Stre
                     continue
                 if text.startswith(chat_service.MODEL_INFO_PREFIX):
                     try:
-                        model_info = json.loads(text[len(chat_service.MODEL_INFO_PREFIX):])
+                        model_info = json.loads(text[len(chat_service.MODEL_INFO_PREFIX) :])
                     except ValueError:
                         logger.warning("Ignoring malformed model info: %.200s", text)
                     continue

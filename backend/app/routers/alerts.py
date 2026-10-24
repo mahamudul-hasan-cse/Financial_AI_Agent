@@ -113,7 +113,9 @@ def _evaluate(alert: dict[str, Any]) -> AlertCheckItem:
     except Exception:
         logger.warning("Could not evaluate alert %s", alert.get("id"), exc_info=True)
         reason = "Could not evaluate this alert right now."
-    return AlertCheckItem(alert=AlertResponse.model_validate(alert), triggered=triggered, reason=reason)
+    return AlertCheckItem(
+        alert=AlertResponse.model_validate(alert), triggered=triggered, reason=reason
+    )
 
 
 @router.get("/{session_id}/check", response_model=AlertCheckResponse)

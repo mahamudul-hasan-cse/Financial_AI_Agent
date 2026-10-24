@@ -48,9 +48,7 @@ class SentimentResult(BaseModel):
 
     label: SentimentLabel = Field(..., description="Coarse sentiment label.")
     score: float = Field(..., ge=0.0, le=1.0, description="Confidence score.")
-    compound: float = Field(
-        ..., ge=-1.0, le=1.0, description="VADER compound polarity score."
-    )
+    compound: float = Field(..., ge=-1.0, le=1.0, description="VADER compound polarity score.")
 
     model_config = {"frozen": True}
 
@@ -67,9 +65,7 @@ class NLPMetadataSchema(BaseModel):
     intent_confidence: float = Field(
         default=0.0, ge=0.0, le=1.0, description="Classifier confidence."
     )
-    intent_method: str = Field(
-        default="keyword", description="'ml' or 'keyword'."
-    )
+    intent_method: str = Field(default="keyword", description="'ml' or 'keyword'.")
     sentiment: SentimentResult
     spacy_available: bool = False
     vader_available: bool = False

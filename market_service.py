@@ -73,7 +73,9 @@ def get_recent_headlines(symbol: str, limit: int = 5) -> list[dict[str, Any]]:
         for item in cache.cached_ticker_news(symbol)[:limit]:
             title = item.get("title") or (item.get("content") or {}).get("title", "")
             url = item.get("link") or (item.get("content") or {}).get("canonicalUrl", {}).get("url")
-            publisher = item.get("publisher") or (item.get("content") or {}).get("provider", {}).get("displayName")
+            publisher = item.get("publisher") or (item.get("content") or {}).get(
+                "provider", {}
+            ).get("displayName")
             if title:
                 headlines.append({"title": title, "url": url, "publisher": publisher})
     except Exception:
@@ -137,14 +139,24 @@ def get_market_context(symbol: str) -> dict[str, Any]:
         "week_change_pct": week_change_pct,
         "recommendation": info.get("recommendationKey"),
         "analyst_view": info.get("recommendationMean"),
-        "sentiment_label": "bullish" if (change_pct or 0) > 1 else "bearish" if (change_pct or 0) < -1 else "neutral",
+        "sentiment_label": (
+            "bullish"
+            if (change_pct or 0) > 1
+            else "bearish" if (change_pct or 0) < -1 else "neutral"
+        ),
         "fundamentals": [
             {"label": "Market Cap", "value": _format_number(info.get("marketCap"))},
             {"label": "P/E", "value": _format_number(info.get("trailingPE"))},
             {"label": "Forward P/E", "value": _format_number(info.get("forwardPE"))},
             {"label": "Revenue", "value": _format_number(info.get("totalRevenue"))},
-            {"label": "Profit Margin", "value": f"{(_safe_float(info.get('profitMargins')) or 0) * 100:.1f}%"},
-            {"label": "52W Range", "value": f"{_safe_float(info.get('fiftyTwoWeekLow')) or 0:.2f} - {_safe_float(info.get('fiftyTwoWeekHigh')) or 0:.2f}"},
+            {
+                "label": "Profit Margin",
+                "value": f"{(_safe_float(info.get('profitMargins')) or 0) * 100:.1f}%",
+            },
+            {
+                "label": "52W Range",
+                "value": f"{_safe_float(info.get('fiftyTwoWeekLow')) or 0:.2f} - {_safe_float(info.get('fiftyTwoWeekHigh')) or 0:.2f}",
+            },
         ],
         "headlines": get_recent_headlines(symbol),
         "chart": chart,
@@ -164,12 +176,40 @@ def build_comparison(symbols: list[str]) -> dict[str, Any]:
     snapshots = [get_market_context(symbol) for symbol in clean_symbols[:4]]
     rows = []
     metrics = [
-        ("Current Price", lambda snap: f"${snap['price']:.2f}" if snap["price"] is not None else "n/a"),
-        ("1M Trend", lambda snap: f"{snap['week_change_pct']:+.2f}%" if snap["week_change_pct"] is not None else "n/a"),
-        ("Market Cap", lambda snap: next((m["value"] for m in snap["fundamentals"] if m["label"] == "Market Cap"), "n/a")),
-        ("P/E", lambda snap: next((m["value"] for m in snap["fundamentals"] if m["label"] == "P/E"), "n/a")),
-        ("Forward P/E", lambda snap: next((m["value"] for m in snap["fundamentals"] if m["label"] == "Forward P/E"), "n/a")),
-        ("Revenue", lambda snap: next((m["value"] for m in snap["fundamentals"] if m["label"] == "Revenue"), "n/a")),
+        (
+            "Current Price",
+            lambda snap: f"${snap['price']:.2f}" if snap["price"] is not None else "n/a",
+        ),
+        (
+            "1M Trend",
+            lambda snap: (
+                f"{snap['week_change_pct']:+.2f}%" if snap["week_change_pct"] is not None else "n/a"
+            ),
+        ),
+        (
+            "Market Cap",
+            lambda snap: next(
+                (m["value"] for m in snap["fundamentals"] if m["label"] == "Market Cap"), "n/a"
+            ),
+        ),
+        (
+            "P/E",
+            lambda snap: next(
+                (m["value"] for m in snap["fundamentals"] if m["label"] == "P/E"), "n/a"
+            ),
+        ),
+        (
+            "Forward P/E",
+            lambda snap: next(
+                (m["value"] for m in snap["fundamentals"] if m["label"] == "Forward P/E"), "n/a"
+            ),
+        ),
+        (
+            "Revenue",
+            lambda snap: next(
+                (m["value"] for m in snap["fundamentals"] if m["label"] == "Revenue"), "n/a"
+            ),
+        ),
         ("Sentiment", lambda snap: snap["sentiment_label"] or "neutral"),
     ]
     for label, getter in metrics:
@@ -223,4 +263,3 @@ def build_watchlist_items(symbols: list[str]) -> list[dict[str, Any]]:
             item["signal"] = f"1M trend {context['week_change_pct']:+.2f}%"
         items.append(item)
     return items
-

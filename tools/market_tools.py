@@ -66,7 +66,9 @@ class MarketDataTools(Toolkit):
     def _cached(function: str, symbol: str, build: Callable[[str], str], *args: Any) -> str:
         sym = _clean_symbol(symbol)
         try:
-            return cache.get_or_set(cache.make_key(f"tool:{function}", sym, *args), lambda: build(sym))
+            return cache.get_or_set(
+                cache.make_key(f"tool:{function}", sym, *args), lambda: build(sym)
+            )
         except Exception as exc:
             logger.warning("%s(%s) failed: %s", function, sym, exc)
             return f"Error: could not fetch {function.replace('_', ' ')} for {sym} ({type(exc).__name__})."
@@ -114,6 +116,7 @@ class MarketDataTools(Toolkit):
 
 
 # ── Builders (run on cache miss; may raise) ──────────────────────────
+
 
 def _price_fields(info: dict[str, Any]) -> dict[str, Any]:
     price = _num(info.get("regularMarketPrice")) or _num(info.get("currentPrice"))
@@ -210,6 +213,4 @@ def _news(symbol: str, limit: int) -> str:
         )
     if not stories:
         return f"No recent news found for {symbol}."
-    return json.dumps(
-        [{k: v for k, v in s.items() if v} for s in stories], separators=(",", ":")
-    )
+    return json.dumps([{k: v for k, v in s.items() if v} for s in stories], separators=(",", ":"))

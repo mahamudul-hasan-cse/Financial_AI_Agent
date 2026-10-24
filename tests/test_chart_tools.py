@@ -5,26 +5,35 @@ Every tool now returns a JSON string conforming to ``ToolResult``.
 """
 
 import json
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pandas as pd
 import pytest
-from unittest.mock import MagicMock, patch
 
-from tools.chart_tools import ChartTools, ToolResult
-
+from tools.chart_tools import ChartTools
 
 # ── Helpers ──────────────────────────────────────────────────────────
+
 
 def _parse(raw: str) -> dict:
     """Parse a tool's JSON response string into a dict."""
     return json.loads(raw)
 
 
-REQUIRED_KEYS: set[str] = {"status", "tool_name", "message", "data", "artifacts", "sources", "errors"}
+REQUIRED_KEYS: set[str] = {
+    "status",
+    "tool_name",
+    "message",
+    "data",
+    "artifacts",
+    "sources",
+    "errors",
+}
 
 
 # ── Fixtures ─────────────────────────────────────────────────────────
+
 
 @pytest.fixture
 def chart_tools(tmp_path):
@@ -39,10 +48,10 @@ def fake_history():
     prices = np.linspace(100.0, 120.0, 30)
     return pd.DataFrame(
         {
-            "Open":   prices - 0.5,
-            "High":   prices + 1.0,
-            "Low":    prices - 1.0,
-            "Close":  prices,
+            "Open": prices - 0.5,
+            "High": prices + 1.0,
+            "Low": prices - 1.0,
+            "Close": prices,
             "Volume": [5_000_000] * 30,
         },
         index=dates,
@@ -50,6 +59,7 @@ def fake_history():
 
 
 # ── Shared response-format tests ────────────────────────────────────
+
 
 class TestToolResultFormat:
     """Every tool must return valid JSON matching the ToolResult schema."""
@@ -80,7 +90,9 @@ class TestToolResultFormat:
         assert result["errors"] == []
 
     def test_error_errors_list_non_empty(self, chart_tools):
-        with patch("cache.cached_ticker_history", side_effect=ConnectionError("Network unavailable")):
+        with patch(
+            "cache.cached_ticker_history", side_effect=ConnectionError("Network unavailable")
+        ):
             result = _parse(chart_tools.create_stock_chart("AAPL"))
         assert len(result["errors"]) > 0
 
@@ -99,8 +111,10 @@ class TestToolResultFormat:
         """Smoke test: every registered tool returns parseable JSON with the right keys."""
         mock_info = MagicMock()
         mock_info.last_price = 150.0
-        with patch("cache.cached_ticker_history", return_value=fake_history), \
-             patch("cache.cached_fast_info", return_value=mock_info):
+        with (
+            patch("cache.cached_ticker_history", return_value=fake_history),
+            patch("cache.cached_fast_info", return_value=mock_info),
+        ):
             for raw in [
                 chart_tools.create_stock_chart("AAPL"),
                 chart_tools.create_comparison_bar_chart("AAPL,MSFT"),
@@ -114,6 +128,7 @@ class TestToolResultFormat:
 
 
 # ── create_stock_chart ───────────────────────────────────────────────
+
 
 class TestCreateStockChart:
     def test_returns_success_with_filename(self, chart_tools, fake_history):
@@ -169,7 +184,9 @@ class TestCreateStockChart:
         assert len(result["errors"]) > 0
 
     def test_yfinance_exception_returns_error(self, chart_tools):
-        with patch("cache.cached_ticker_history", side_effect=ConnectionError("Network unavailable")):
+        with patch(
+            "cache.cached_ticker_history", side_effect=ConnectionError("Network unavailable")
+        ):
             result = _parse(chart_tools.create_stock_chart("AAPL"))
 
         assert result["status"] == "error"
@@ -194,6 +211,7 @@ class TestCreateStockChart:
 
 
 # ── create_comparison_bar_chart ──────────────────────────────────────
+
 
 class TestCreateComparisonBarChart:
     def test_returns_success_for_valid_symbols(self, chart_tools):
@@ -260,6 +278,7 @@ class TestCreateComparisonBarChart:
 
 # ── Generic chart generators ─────────────────────────────────────────
 
+
 class TestGenerateCharts:
     """Tests for the generic chart generators (no yfinance calls)."""
 
@@ -283,17 +302,20 @@ class TestGenerateCharts:
         assert "pie_chart" in result["artifacts"][0]["filename"]
 
     def test_line_chart_custom_labels(self, chart_tools):
-        result = _parse(chart_tools.generate_line_chart(
-            ["Jan", "Feb", "Mar"], [50, 60, 55],
-            title="Monthly Avg", x_label="Month", y_label="Price"
-        ))
+        result = _parse(
+            chart_tools.generate_line_chart(
+                ["Jan", "Feb", "Mar"],
+                [50, 60, 55],
+                title="Monthly Avg",
+                x_label="Month",
+                y_label="Price",
+            )
+        )
         assert result["status"] == "success"
         assert result["data"]["title"] == "Monthly Avg"
 
     def test_bar_chart_custom_color(self, chart_tools):
-        result = _parse(chart_tools.generate_bar_chart(
-            ["A", "B"], [1, 2], color="steelblue"
-        ))
+        result = _parse(chart_tools.generate_bar_chart(["A", "B"], [1, 2], color="steelblue"))
         assert result["status"] == "success"
 
     def test_line_chart_data_has_point_count(self, chart_tools):

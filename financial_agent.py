@@ -31,7 +31,8 @@ from backend.app.agent.prompts import (  # noqa: F401
     TOOL_CATALOGUE,
 )
 from backend.app.agent.tool_registry import TOOL_FACTORIES, build_tools  # noqa: F401
-from backend.app.agent.tool_registry import build_tools as _build_tools  # noqa: F401
+
+_build_tools = build_tools  # backward-compat alias
 
 __all__ = [  # noqa: F822
     "FinancialAgentService",

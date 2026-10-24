@@ -127,4 +127,3 @@ class ComparisonResponse(BaseModel):
     recommendation: str
     rows: list[ComparisonRow] = Field(default_factory=list)
     sources: list[ResearchSource] = Field(default_factory=list)
-

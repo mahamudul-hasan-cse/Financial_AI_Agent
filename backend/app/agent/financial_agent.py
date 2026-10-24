@@ -193,7 +193,10 @@ def is_fallback_error(exc: BaseException) -> bool:
         if isinstance(err, (httpx.TransportError, ConnectionError, TimeoutError)):
             return True
         if type(err).__name__ in (
-            "APIConnectionError", "APITimeoutError", "InternalServerError", "ServiceUnavailableError"
+            "APIConnectionError",
+            "APITimeoutError",
+            "InternalServerError",
+            "ServiceUnavailableError",
         ):
             return True
         status = getattr(err, "status_code", None)
@@ -227,7 +230,7 @@ def retry_after_seconds(exc: BaseException) -> float | None:
 def retry_delay(exc: BaseException, attempt: int) -> int:
     """Whole seconds to wait before retry number *attempt* (1-based)."""
     if is_rate_limit_error(exc):
-        delay = retry_after_seconds(exc) or 2.0 ** attempt
+        delay = retry_after_seconds(exc) or 2.0**attempt
     else:
         delay = 1.0
     return max(1, min(math.ceil(delay), settings.llm_retry_max_delay))
@@ -518,6 +521,7 @@ def create_agent(
 
 # ── Service class ────────────────────────────────────────────────────
 
+
 class FinancialAgentService:
     """High-level wrapper around the agno Agent.
 
@@ -742,7 +746,7 @@ class FinancialAgentService:
             raw_buffer += text
             cleaned = _strip_tool_metadata_streaming(raw_buffer)
             if cleaned.startswith(emitted_clean):
-                delta = cleaned[len(emitted_clean):]
+                delta = cleaned[len(emitted_clean) :]
             else:
                 delta = cleaned
             if delta:
@@ -917,6 +921,7 @@ def _cli_agent() -> Agent:
 
 
 # ── CLI ──────────────────────────────────────────────────────────────
+
 
 def main() -> None:
     """Run the agent interactively from the command line."""

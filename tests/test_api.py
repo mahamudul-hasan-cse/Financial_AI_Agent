@@ -13,7 +13,7 @@ Covers:
 
 import json
 import time
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -45,6 +45,7 @@ class TestHealth:
 
     def test_health_needs_no_client_id(self, mock_agent):
         from api import app
+
         assert TestClient(app).get("/api/health").status_code == 200
 
     def test_health_shows_groq_configured(self, client: TestClient):
@@ -59,7 +60,6 @@ class TestHealth:
 
     def test_health_reports_active_sessions(self, client: TestClient):
         """active_sessions should reflect the number of stored sessions."""
-        from api import sessions
 
         assert client.get("/api/health").json()["active_sessions"] == 0
 
@@ -87,8 +87,7 @@ class TestHealth:
     def test_health_response_model_shape(self, client: TestClient):
         """Every documented key in HealthResponse must be present."""
         data = client.get("/api/health").json()
-        for key in ("status", "groq_configured", "active_sessions",
-                     "total_messages", "nlp_status"):
+        for key in ("status", "groq_configured", "active_sessions", "total_messages", "nlp_status"):
             assert key in data, f"Missing key: {key}"
 
 
@@ -104,9 +103,14 @@ class TestStats:
 
     def test_stats_has_required_fields(self, client: TestClient):
         data = client.get("/api/stats").json()
-        for key in ("total_messages", "intent_distribution",
-                     "avg_response_time_ms", "active_sessions",
-                     "total_sessions_created", "classifier_usage"):
+        for key in (
+            "total_messages",
+            "intent_distribution",
+            "avg_response_time_ms",
+            "active_sessions",
+            "total_sessions_created",
+            "classifier_usage",
+        ):
             assert key in data, f"Missing key: {key}"
 
     def test_stats_total_messages_increments(self, client: TestClient):
@@ -181,6 +185,7 @@ class TestChat:
         assert session_id is not None
 
         from api import sessions
+
         assert session_id in sessions
         assert len(sessions[session_id]["messages"]) == 2  # user + assistant
 
@@ -192,6 +197,7 @@ class TestChat:
         assert res2.status_code == 200
 
         from api import sessions
+
         assert len(sessions[sid]["messages"]) == 4  # 2 pairs
 
     def test_chat_empty_message_rejected(self, client: TestClient):
@@ -203,7 +209,6 @@ class TestChat:
         assert res.status_code == 422
 
     def test_chat_agent_timeout(self, client: TestClient, mock_agent):
-        from concurrent.futures import TimeoutError as FuturesTimeoutError
 
         mock_agent.run.side_effect = RuntimeError("timeout")
         res = client.post("/api/chat", json={"message": "Hello"})
@@ -224,9 +229,7 @@ class TestChat:
 
     def test_chat_nlp_metadata_has_expected_keys(self, client: TestClient):
         """nlp_metadata should contain entities, intent, and sentiment."""
-        data = client.post(
-            "/api/chat", json={"message": "Tell me about Tesla revenue"}
-        ).json()
+        data = client.post("/api/chat", json={"message": "Tell me about Tesla revenue"}).json()
         meta = data["nlp_metadata"]
         for key in ("entities", "intent", "sentiment"):
             assert key in meta, f"Missing nlp_metadata key: {key}"
@@ -245,6 +248,7 @@ class TestChat:
         assert res.json()["session_id"] == sid
 
         from api import sessions
+
         assert sid in sessions
 
     def test_chat_agent_retry_succeeds_after_failure(self, client: TestClient, mock_agent):
@@ -263,6 +267,7 @@ class TestChat:
         sid = res.json()["session_id"]
 
         from api import sessions
+
         msgs = sessions[sid]["messages"]
         assert msgs[0]["role"] == "user"
         assert msgs[0]["content"] == "History check"
@@ -350,6 +355,7 @@ class TestChatStream:
 
         # Extract session_id from the NLP_META (not returned in body directly)
         from api import sessions
+
         assert len(sessions) == 1
         sid = next(iter(sessions))
         msgs = sessions[sid]["messages"]
@@ -368,6 +374,7 @@ class TestChatStream:
         assert r2.status_code == 200
 
         from api import sessions
+
         assert len(sessions[sid]["messages"]) == 4  # 2 from chat + 2 from stream
 
     def test_stream_agent_error_emits_error_event(self, client: TestClient, mock_agent):
@@ -427,6 +434,7 @@ class TestSessionManagement:
         assert res.json()["status"] == "cleared"
 
         from api import sessions
+
         assert sid not in sessions
 
     def test_clear_nonexistent_session(self, client: TestClient):
@@ -434,7 +442,7 @@ class TestSessionManagement:
         assert res.status_code == 200  # Idempotent
 
     def test_max_sessions_eviction(self, client: TestClient):
-        from api import sessions, MAX_SESSIONS
+        from api import MAX_SESSIONS, sessions
 
         for i in range(MAX_SESSIONS):
             sessions[f"sess-{i}"] = {"messages": [], "last_active": time.time() - i}
@@ -456,7 +464,7 @@ class TestSessionManagement:
 
     def test_session_ttl_cleanup(self, client: TestClient):
         """Expired sessions should be cleaned up on the next request."""
-        from api import sessions, SESSION_TTL
+        from api import SESSION_TTL, sessions
 
         # Plant an expired session
         sessions["old-sess"] = {
@@ -470,7 +478,7 @@ class TestSessionManagement:
 
     def test_eviction_removes_oldest(self, client: TestClient):
         """When MAX_SESSIONS is hit, the oldest (least-recently-active) is evicted."""
-        from api import sessions, MAX_SESSIONS
+        from api import MAX_SESSIONS, sessions
 
         # Plant MAX_SESSIONS sessions with descending last_active
         for i in range(MAX_SESSIONS):
@@ -632,6 +640,7 @@ class TestGracefulFailures:
         client.post("/api/chat/stream", json={"message": "ghost"})
 
         from api import sessions
+
         sid = next(iter(sessions))
         # An empty stream should NOT append messages
         assert len(sessions[sid]["messages"]) == 0
@@ -669,6 +678,7 @@ class TestGracefulFailures:
             assert res.status_code == 200
 
         from api import sessions
+
         assert len(sessions) == 20
 
 
@@ -691,9 +701,7 @@ class TestSchemaIntegration:
         """nlp_metadata in chat response must match NLPMetadataSchema."""
         from schemas import NLPMetadataSchema
 
-        data = client.post(
-            "/api/chat", json={"message": "Apple stock price"}
-        ).json()
+        data = client.post("/api/chat", json={"message": "Apple stock price"}).json()
         meta = NLPMetadataSchema.model_validate(data["nlp_metadata"])
         assert isinstance(meta.entities, list)
         assert isinstance(meta.intent, str)
@@ -737,9 +745,7 @@ class TestSchemaIntegration:
         """Entity sub-models should have text, label, and optional ticker."""
         from schemas import NLPMetadataSchema
 
-        data = client.post(
-            "/api/chat", json={"message": "What is Tesla stock price?"}
-        ).json()
+        data = client.post("/api/chat", json={"message": "What is Tesla stock price?"}).json()
         meta = NLPMetadataSchema.model_validate(data["nlp_metadata"])
         if meta.entities:
             ent = meta.entities[0]
@@ -767,7 +773,9 @@ class TestNLPPipelineGracefulDegradation:
 
     def test_chat_succeeds_when_nlp_pipeline_raises(self, client: TestClient):
         """Chat should return 200 with default NLP metadata when the pipeline fails."""
-        with patch("backend.app.services.chat.run_nlp_pipeline", side_effect=RuntimeError("spaCy crashed")):
+        with patch(
+            "backend.app.services.chat.run_nlp_pipeline", side_effect=RuntimeError("spaCy crashed")
+        ):
             res = client.post("/api/chat", json={"message": "What is AAPL?"})
         assert res.status_code == 200
         data = res.json()
@@ -779,7 +787,9 @@ class TestNLPPipelineGracefulDegradation:
 
     def test_stream_succeeds_when_nlp_pipeline_raises(self, client: TestClient):
         """Streaming should emit default NLP metadata when the pipeline fails."""
-        with patch("backend.app.services.chat.run_nlp_pipeline", side_effect=RuntimeError("VADER crashed")):
+        with patch(
+            "backend.app.services.chat.run_nlp_pipeline", side_effect=RuntimeError("VADER crashed")
+        ):
             res = client.post("/api/chat/stream", json={"message": "TSLA news"})
         assert res.status_code == 200
         body = res.text

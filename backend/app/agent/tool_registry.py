@@ -66,6 +66,7 @@ TOOL_FACTORIES: list[tuple[str, Callable[[], Toolkit]]] = [
 
 # ── Tool hook ────────────────────────────────────────────────────────
 
+
 def truncate_output(text: str, limit: int | None = None) -> str:
     """Cut *text* to *limit* characters (default ``TOOL_OUTPUT_MAX_CHARS``)."""
     limit = limit or settings.tool_output_max_chars
@@ -99,6 +100,7 @@ def compact_tool_output(
 
 # ── Public builder ───────────────────────────────────────────────────
 
+
 def build_tools(
     factories: list[tuple[str, Callable[[], Toolkit]]] | None = None,
 ) -> list[Toolkit]:
@@ -118,6 +120,8 @@ def build_tools(
             logger.debug("Loaded toolkit: %s", name)
         except Exception:
             logger.warning(
-                "Failed to load toolkit '%s' — skipping.", name, exc_info=True,
+                "Failed to load toolkit '%s' — skipping.",
+                name,
+                exc_info=True,
             )
     return tools

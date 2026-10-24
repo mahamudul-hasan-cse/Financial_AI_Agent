@@ -77,8 +77,11 @@ def _no_network_headlines():
     import cache
 
     cache.clear()
-    with patch("market_service.get_recent_headlines", return_value=[]), patch(
-        "research_service.get_market_context", side_effect=ConnectionError("offline in tests")
+    with (
+        patch("market_service.get_recent_headlines", return_value=[]),
+        patch(
+            "research_service.get_market_context", side_effect=ConnectionError("offline in tests")
+        ),
     ):
         yield
 

@@ -32,7 +32,9 @@ def company_snapshot(symbol: str) -> CompanySnapshotResponse:
         return CompanySnapshotResponse.model_validate(get_market_context(ticker))
     except Exception as exc:
         logger.warning("Snapshot failed for %s", ticker, exc_info=True)
-        raise HTTPException(status_code=502, detail=f"Market data unavailable for {ticker}.") from exc
+        raise HTTPException(
+            status_code=502, detail=f"Market data unavailable for {ticker}."
+        ) from exc
 
 
 @router.get("/compare", response_model=ComparisonResponse)

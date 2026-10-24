@@ -12,7 +12,6 @@ Run directly: python evaluation.py
 from __future__ import annotations
 
 import random
-import sys
 from collections import defaultdict
 
 # ── Gold-standard test set for intent classification ─────────────────────────
@@ -29,7 +28,6 @@ INTENT_TEST_SET: list[tuple[str, str]] = [
     ("Price of Netflix stock", "stock_price"),
     ("What's the current value of AMD shares?", "stock_price"),
     ("Check the live quote for Disney", "stock_price"),
-
     # chart (10)
     ("Plot the price of AAPL for the last 6 months", "chart"),
     ("Show a chart of Tesla this year", "chart"),
@@ -41,7 +39,6 @@ INTENT_TEST_SET: list[tuple[str, str]] = [
     ("Create a graph of Netflix performance", "chart"),
     ("Display a chart for AMD over 3 months", "chart"),
     ("Can you plot Disney stock movement?", "chart"),
-
     # comparison (10)
     ("Compare Apple and Microsoft stocks", "comparison"),
     ("Tesla vs Rivian which is better?", "comparison"),
@@ -53,7 +50,6 @@ INTENT_TEST_SET: list[tuple[str, str]] = [
     ("Intel versus AMD comparison", "comparison"),
     ("Difference between JPM and BAC stock?", "comparison"),
     ("Which is a better investment Uber or Lyft?", "comparison"),
-
     # news (10)
     ("What are the latest news for AAPL?", "news"),
     ("Recent headlines about Tesla", "news"),
@@ -65,7 +61,6 @@ INTENT_TEST_SET: list[tuple[str, str]] = [
     ("Recent financial reports for Netflix", "news"),
     ("What's the latest on the Fed meeting?", "news"),
     ("News about Disney earnings", "news"),
-
     # fundamentals (10)
     ("What is Apple's PE ratio?", "fundamentals"),
     ("Show Tesla's earnings per share", "fundamentals"),
@@ -77,7 +72,6 @@ INTENT_TEST_SET: list[tuple[str, str]] = [
     ("Free cash flow for Meta", "fundamentals"),
     ("EBITDA of Netflix", "fundamentals"),
     ("Balance sheet analysis for JPMorgan", "fundamentals"),
-
     # recommendation (10)
     ("Should I buy Apple stock?", "recommendation"),
     ("What do analysts rate Tesla?", "recommendation"),
@@ -89,7 +83,6 @@ INTENT_TEST_SET: list[tuple[str, str]] = [
     ("Buy sell hold rating for Netflix", "recommendation"),
     ("Is AMD stock undervalued?", "recommendation"),
     ("Wall Street outlook on Disney", "recommendation"),
-
     # excel (10)
     ("Create an Excel file for AAPL", "excel"),
     ("Download Tesla data as spreadsheet", "excel"),
@@ -101,7 +94,6 @@ INTENT_TEST_SET: list[tuple[str, str]] = [
     ("Download stock data as xlsx file", "excel"),
     ("Create a financial spreadsheet for Netflix", "excel"),
     ("Excel export for AMD fundamentals", "excel"),
-
     # general (10)
     ("Hello how are you?", "general"),
     ("What can you help me with?", "general"),
@@ -121,77 +113,99 @@ INTENT_TEST_SET: list[tuple[str, str]] = [
 NER_TEST_SET: list[tuple[str, list[dict]]] = [
     # ── TICKER examples ──
     ("What is AAPL stock price?", [{"text": "AAPL", "label": "TICKER"}]),
-    ("Compare MSFT vs GOOGL", [{"text": "MSFT", "label": "TICKER"}, {"text": "GOOGL", "label": "TICKER"}]),
+    (
+        "Compare MSFT vs GOOGL",
+        [{"text": "MSFT", "label": "TICKER"}, {"text": "GOOGL", "label": "TICKER"}],
+    ),
     ("Show me NVDA performance", [{"text": "NVDA", "label": "TICKER"}]),
     ("Is TSLA a good buy?", [{"text": "TSLA", "label": "TICKER"}]),
     ("Get quote for AMZN", [{"text": "AMZN", "label": "TICKER"}]),
     ("Chart META over 1 year", [{"text": "META", "label": "TICKER"}]),
-
     # ── ORG examples ──
     ("Tesla earnings report", [{"text": "Tesla", "label": "ORG"}]),
     ("Microsoft announced layoffs", [{"text": "Microsoft", "label": "ORG"}]),
     ("Apple released new products", [{"text": "Apple", "label": "ORG"}]),
     ("Goldman Sachs quarterly results", [{"text": "Goldman Sachs", "label": "ORG"}]),
     ("What is Nvidia revenue?", [{"text": "Nvidia", "label": "ORG"}]),
-
     # ── FIN_METRIC examples ──
     ("Show me the P/E ratio for Apple", [{"text": "P/E ratio", "label": "FIN_METRIC"}]),
-    ("What is the RSI for NVDA?", [
-        {"text": "RSI", "label": "FIN_METRIC"},
-        {"text": "NVDA", "label": "TICKER"},
-    ]),
-    ("EBITDA of Microsoft in FY2023", [
-        {"text": "EBITDA", "label": "FIN_METRIC"},
-        {"text": "FY2023", "label": "DATE_REF"},
-    ]),
+    (
+        "What is the RSI for NVDA?",
+        [
+            {"text": "RSI", "label": "FIN_METRIC"},
+            {"text": "NVDA", "label": "TICKER"},
+        ],
+    ),
+    (
+        "EBITDA of Microsoft in FY2023",
+        [
+            {"text": "EBITDA", "label": "FIN_METRIC"},
+            {"text": "FY2023", "label": "DATE_REF"},
+        ],
+    ),
     ("What is the ROE for this company?", [{"text": "ROE", "label": "FIN_METRIC"}]),
     ("Show me the dividend yield", [{"text": "dividend yield", "label": "FIN_METRIC"}]),
     ("Current market cap of Tesla", [{"text": "market cap", "label": "FIN_METRIC"}]),
     ("Free cash flow for Amazon", [{"text": "free cash flow", "label": "FIN_METRIC"}]),
-
     # ── DATE_REF examples ──
-    ("Revenue was $1.2B in Q3 2024", [
-        {"text": "$1.2B", "label": "MONEY"},
-        {"text": "Q3 2024", "label": "DATE_REF"},
-    ]),
+    (
+        "Revenue was $1.2B in Q3 2024",
+        [
+            {"text": "$1.2B", "label": "MONEY"},
+            {"text": "Q3 2024", "label": "DATE_REF"},
+        ],
+    ),
     ("Results for FY2023", [{"text": "FY2023", "label": "DATE_REF"}]),
     ("Performance in Q1 2025", [{"text": "Q1 2025", "label": "DATE_REF"}]),
     ("H1 2024 earnings call", [{"text": "H1 2024", "label": "DATE_REF"}]),
     ("Growth in Q4 2025 was strong", [{"text": "Q4 2025", "label": "DATE_REF"}]),
-
     # ── MONEY examples ──
-    ("Stock worth $500M with EPS of $3.50", [
-        {"text": "$500M", "label": "MONEY"},
-        {"text": "EPS", "label": "FIN_METRIC"},
-        {"text": "$3.50", "label": "MONEY"},
-    ]),
+    (
+        "Stock worth $500M with EPS of $3.50",
+        [
+            {"text": "$500M", "label": "MONEY"},
+            {"text": "EPS", "label": "FIN_METRIC"},
+            {"text": "$3.50", "label": "MONEY"},
+        ],
+    ),
     ("Revenue hit $10B last quarter", [{"text": "$10B", "label": "MONEY"}]),
     ("Share price dropped to $150", [{"text": "$150", "label": "MONEY"}]),
-    ("Profit was $2.5M in FY2023", [
-        {"text": "$2.5M", "label": "MONEY"},
-        {"text": "FY2023", "label": "DATE_REF"},
-    ]),
+    (
+        "Profit was $2.5M in FY2023",
+        [
+            {"text": "$2.5M", "label": "MONEY"},
+            {"text": "FY2023", "label": "DATE_REF"},
+        ],
+    ),
     ("Target price is $500", [{"text": "$500", "label": "MONEY"}]),
-
     # ── Multi-entity examples ──
-    ("AAPL reported $3.50 EPS in Q4 2025", [
-        {"text": "AAPL", "label": "TICKER"},
-        {"text": "$3.50", "label": "MONEY"},
-        {"text": "EPS", "label": "FIN_METRIC"},
-        {"text": "Q4 2025", "label": "DATE_REF"},
-    ]),
-    ("Tesla market cap is $800B with P/E ratio of 60", [
-        {"text": "Tesla", "label": "ORG"},
-        {"text": "market cap", "label": "FIN_METRIC"},
-        {"text": "$800B", "label": "MONEY"},
-        {"text": "P/E ratio", "label": "FIN_METRIC"},
-    ]),
-    ("MSFT dividend yield in Q2 2025 was $0.75", [
-        {"text": "MSFT", "label": "TICKER"},
-        {"text": "dividend yield", "label": "FIN_METRIC"},
-        {"text": "Q2 2025", "label": "DATE_REF"},
-        {"text": "$0.75", "label": "MONEY"},
-    ]),
+    (
+        "AAPL reported $3.50 EPS in Q4 2025",
+        [
+            {"text": "AAPL", "label": "TICKER"},
+            {"text": "$3.50", "label": "MONEY"},
+            {"text": "EPS", "label": "FIN_METRIC"},
+            {"text": "Q4 2025", "label": "DATE_REF"},
+        ],
+    ),
+    (
+        "Tesla market cap is $800B with P/E ratio of 60",
+        [
+            {"text": "Tesla", "label": "ORG"},
+            {"text": "market cap", "label": "FIN_METRIC"},
+            {"text": "$800B", "label": "MONEY"},
+            {"text": "P/E ratio", "label": "FIN_METRIC"},
+        ],
+    ),
+    (
+        "MSFT dividend yield in Q2 2025 was $0.75",
+        [
+            {"text": "MSFT", "label": "TICKER"},
+            {"text": "dividend yield", "label": "FIN_METRIC"},
+            {"text": "Q2 2025", "label": "DATE_REF"},
+            {"text": "$0.75", "label": "MONEY"},
+        ],
+    ),
 ]
 
 
@@ -240,11 +254,17 @@ def compute_classification_metrics(
             "recall": round(macro_r, 4),
             "f1": round(macro_f1, 4),
         },
-        "accuracy": round(sum(1 for t, p in zip(y_true, y_pred) if t == p) / len(y_true), 4) if y_true else 0,
+        "accuracy": (
+            round(sum(1 for t, p in zip(y_true, y_pred) if t == p) / len(y_true), 4)
+            if y_true
+            else 0
+        ),
     }
 
 
-def build_confusion_matrix(y_true: list[str], y_pred: list[str], labels: list[str]) -> list[list[int]]:
+def build_confusion_matrix(
+    y_true: list[str], y_pred: list[str], labels: list[str]
+) -> list[list[int]]:
     """Build a confusion matrix as a 2D list.
 
     Rows = true labels, Columns = predicted labels.
@@ -279,6 +299,7 @@ def evaluate_intent_classifiers() -> dict:
     # ML classifier
     try:
         from intent_classifier import predict_intent
+
         ml_preds = [predict_intent(t)[0] for t in texts]
         results["ml"] = compute_classification_metrics(y_true, ml_preds, labels)
         results["ml"]["confusion_matrix"] = build_confusion_matrix(y_true, ml_preds, labels)
@@ -315,13 +336,15 @@ def evaluate_ner() -> dict:
         total_predicted += len(predicted_set)
         total_correct += len(correct)
 
-        per_example.append({
-            "text": text,
-            "expected": list(expected_set),
-            "predicted": list(predicted_set),
-            "correct": list(correct),
-            "missed": list(expected_set - predicted_set),
-        })
+        per_example.append(
+            {
+                "text": text,
+                "expected": list(expected_set),
+                "predicted": list(predicted_set),
+                "correct": list(correct),
+                "missed": list(expected_set - predicted_set),
+            }
+        )
 
     precision = total_correct / total_predicted if total_predicted > 0 else 0
     recall = total_correct / total_expected if total_expected > 0 else 0
@@ -438,11 +461,13 @@ def evaluate_rag(top_k: int = 5) -> dict:
         # Recall: fraction of queries where at least one relevant chunk was found
         recalls.append(1.0 if relevant_count > 0 else 0.0)
 
-        per_query.append({
-            "query": query,
-            "reciprocal_rank": round(rr, 4),
-            "relevant_chunks_found": relevant_count,
-        })
+        per_query.append(
+            {
+                "query": query,
+                "reciprocal_rank": round(rr, 4),
+                "relevant_chunks_found": relevant_count,
+            }
+        )
 
     mrr = sum(reciprocal_ranks) / len(reciprocal_ranks) if reciprocal_ranks else 0.0
     recall_at_k = sum(recalls) / len(recalls) if recalls else 0.0
@@ -470,36 +495,46 @@ def print_classification_report(name: str, metrics: dict) -> None:
     print(f"  {'-' * 48}")
 
     for label, m in metrics["per_class"].items():
-        print(f"  {label:<18} {m['precision']:>7.2%} {m['recall']:>7.2%} {m['f1']:>7.2%} {m['support']:>9}")
+        print(
+            f"  {label:<18} {m['precision']:>7.2%} {m['recall']:>7.2%} {m['f1']:>7.2%} {m['support']:>9}"
+        )
 
     macro = metrics["macro"]
     print(f"  {'-' * 48}")
-    print(f"  {'macro avg':<18} {macro['precision']:>7.2%} {macro['recall']:>7.2%} {macro['f1']:>7.2%}")
+    print(
+        f"  {'macro avg':<18} {macro['precision']:>7.2%} {macro['recall']:>7.2%} {macro['f1']:>7.2%}"
+    )
     print(f"  {'accuracy':<18} {metrics['accuracy']:>7.2%}")
 
     # Confusion matrix
     if "confusion_matrix" in metrics:
         labels = metrics["labels"]
         matrix = metrics["confusion_matrix"]
-        print(f"\n  Confusion Matrix (rows=true, cols=predicted):")
-        header = "  " + " " * 14 + "".join(f"{l[:6]:>7}" for l in labels)
+        print("\n  Confusion Matrix (rows=true, cols=predicted):")
+        header = "  " + " " * 14 + "".join(f"{l[:6]:>7}" for l in labels)  # noqa: E741
         print(header)
         for i, label in enumerate(labels):
-            row = "  " + f"{label[:13]:<14}" + "".join(f"{matrix[i][j]:>7}" for j in range(len(labels)))
+            row = (
+                "  "
+                + f"{label[:13]:<14}"
+                + "".join(f"{matrix[i][j]:>7}" for j in range(len(labels)))
+            )
             print(row)
 
 
 def print_ner_report(ner_metrics: dict) -> None:
     """Pretty-print NER evaluation results."""
     print(f"\n{'=' * 60}")
-    print(f"  NER Evaluation")
+    print("  NER Evaluation")
     print(f"{'=' * 60}")
     print(f"  Precision: {ner_metrics['precision']:.2%}")
     print(f"  Recall:    {ner_metrics['recall']:.2%}")
     print(f"  F1:        {ner_metrics['f1']:.2%}")
-    print(f"  ({ner_metrics['total_correct']}/{ner_metrics['total_expected']} entities correctly identified)")
+    print(
+        f"  ({ner_metrics['total_correct']}/{ner_metrics['total_expected']} entities correctly identified)"
+    )
 
-    print(f"\n  Per-example breakdown:")
+    print("\n  Per-example breakdown:")
     for ex in ner_metrics["per_example"]:
         status = "OK" if not ex["missed"] else "MISS"
         print(f"    [{status}] \"{ex['text'][:50]}\"")
@@ -511,32 +546,34 @@ def print_ner_report(ner_metrics: dict) -> None:
 def print_ner_per_type_report(per_type: dict) -> None:
     """Pretty-print per-entity-type NER metrics."""
     print(f"\n{'=' * 60}")
-    print(f"  NER Per-Entity-Type Breakdown")
+    print("  NER Per-Entity-Type Breakdown")
     print(f"{'=' * 60}")
     print(f"\n  {'Entity Type':<18} {'Prec':>7} {'Rec':>7} {'F1':>7} {'Support':>9}")
     print(f"  {'-' * 48}")
     for etype, m in per_type.items():
-        print(f"  {etype:<18} {m['precision']:>7.2%} {m['recall']:>7.2%} {m['f1']:>7.2%} {m['support']:>9}")
+        print(
+            f"  {etype:<18} {m['precision']:>7.2%} {m['recall']:>7.2%} {m['f1']:>7.2%} {m['support']:>9}"
+        )
 
 
 def print_rag_report(rag_metrics: dict) -> None:
     """Pretty-print RAG evaluation results."""
     print(f"\n{'=' * 60}")
-    print(f"  RAG Retrieval Evaluation")
+    print("  RAG Retrieval Evaluation")
     print(f"{'=' * 60}")
     if not rag_metrics.get("available", False):
         print("  RAG retriever not available — skipped.")
         return
     print(f"  MRR (Mean Reciprocal Rank): {rag_metrics['mrr']:.2%}")
     print(f"  Recall@{rag_metrics['k']}:                 {rag_metrics['recall_at_k']:.2%}")
-    print(f"\n  Per-query breakdown:")
+    print("\n  Per-query breakdown:")
     for q in rag_metrics.get("per_query", []):
-        print(f"    RR={q['reciprocal_rank']:.2f}  chunks={q['relevant_chunks_found']}  \"{q['query'][:50]}\"")
+        print(
+            f"    RR={q['reciprocal_rank']:.2f}  chunks={q['relevant_chunks_found']}  \"{q['query'][:50]}\""
+        )
 
 
-def compute_calibration(
-    confidences: list[float], correct: list[bool], n_bins: int = 10
-) -> dict:
+def compute_calibration(confidences: list[float], correct: list[bool], n_bins: int = 10) -> dict:
     """Compute confidence calibration metrics.
 
     Bins predictions by confidence and compares predicted vs actual accuracy.
@@ -566,13 +603,15 @@ def compute_calibration(
             avg_conf = (lo + hi) / 2
             avg_acc = 0.0
 
-        bins.append({
-            "bin_range": f"{lo:.1f}-{hi:.1f}",
-            "count": len(bin_confs),
-            "avg_confidence": round(avg_conf, 4),
-            "avg_accuracy": round(avg_acc, 4),
-            "gap": round(abs(avg_acc - avg_conf), 4),
-        })
+        bins.append(
+            {
+                "bin_range": f"{lo:.1f}-{hi:.1f}",
+                "count": len(bin_confs),
+                "avg_confidence": round(avg_conf, 4),
+                "avg_accuracy": round(avg_acc, 4),
+                "gap": round(abs(avg_acc - avg_conf), 4),
+            }
+        )
 
     # Expected Calibration Error (ECE) — weighted average of bin gaps
     total = len(confidences)
@@ -705,6 +744,7 @@ def evaluate_with_confidence_intervals() -> dict:
     # ML classifier
     try:
         from intent_classifier import predict_intent
+
         ml_preds = [predict_intent(t)[0] for t in texts]
         results["ml"] = {
             "accuracy_ci": bootstrap_confidence_interval(y_true, ml_preds, "accuracy"),
@@ -719,7 +759,7 @@ def evaluate_with_confidence_intervals() -> dict:
 def print_calibration_report(cal_results: dict) -> None:
     """Pretty-print confidence calibration analysis."""
     print(f"\n{'=' * 60}")
-    print(f"  Confidence Calibration Analysis")
+    print("  Confidence Calibration Analysis")
     print(f"{'=' * 60}")
 
     if not cal_results.get("available", False):
@@ -735,19 +775,23 @@ def print_calibration_report(cal_results: dict) -> None:
     print(f"  {'-' * 47}")
     for b in cal["bins"]:
         if b["count"] > 0:
-            print(f"  {b['bin_range']:<12} {b['count']:>7} {b['avg_confidence']:>9.1%} {b['avg_accuracy']:>9.1%} {b['gap']:>7.1%}")
+            print(
+                f"  {b['bin_range']:<12} {b['count']:>7} {b['avg_confidence']:>9.1%} {b['avg_accuracy']:>9.1%} {b['gap']:>7.1%}"
+            )
 
-    print(f"\n  Per-Intent Confidence Distribution:")
+    print("\n  Per-Intent Confidence Distribution:")
     print(f"  {'Intent':<18} {'Mean':>8} {'Min':>8} {'Max':>8} {'Count':>7}")
     print(f"  {'-' * 49}")
     for intent, stats in cal_results["per_intent_confidence"].items():
-        print(f"  {intent:<18} {stats['mean']:>7.1%} {stats['min']:>7.1%} {stats['max']:>7.1%} {stats['count']:>7}")
+        print(
+            f"  {intent:<18} {stats['mean']:>7.1%} {stats['min']:>7.1%} {stats['max']:>7.1%} {stats['count']:>7}"
+        )
 
 
 def print_confidence_interval_report(ci_results: dict) -> None:
     """Pretty-print bootstrap confidence intervals."""
     print(f"\n{'=' * 60}")
-    print(f"  Bootstrap Confidence Intervals (95%)")
+    print("  Bootstrap Confidence Intervals (95%)")
     print(f"{'=' * 60}")
 
     for name, data in ci_results.items():
@@ -757,7 +801,9 @@ def print_confidence_interval_report(ci_results: dict) -> None:
         print(f"\n  {name.upper()} Classifier:")
         for metric_name, ci in data.items():
             label = metric_name.replace("_ci", "").replace("_", " ").title()
-            print(f"    {label}: {ci['point_estimate']:.2%} [{ci['ci_lower']:.2%}, {ci['ci_upper']:.2%}]")
+            print(
+                f"    {label}: {ci['point_estimate']:.2%} [{ci['ci_lower']:.2%}, {ci['ci_upper']:.2%}]"
+            )
 
 
 def run_full_evaluation() -> dict:
@@ -787,7 +833,10 @@ if __name__ == "__main__":
     results = run_full_evaluation()
 
     print_classification_report("Keyword Intent Classifier", results["intent"]["keyword"])
-    print_classification_report("ML Intent Classifier (TF-IDF + LogReg)", results["intent"].get("ml", {"error": "not available"}))
+    print_classification_report(
+        "ML Intent Classifier (TF-IDF + LogReg)",
+        results["intent"].get("ml", {"error": "not available"}),
+    )
     print_ner_report(results["ner"])
     print_ner_per_type_report(results["ner_per_type"])
     print_rag_report(results["rag"])
@@ -796,7 +845,7 @@ if __name__ == "__main__":
 
     # Summary comparison
     print(f"\n{'=' * 60}")
-    print(f"  Summary: ML vs Keyword Classifier")
+    print("  Summary: ML vs Keyword Classifier")
     print(f"{'=' * 60}")
 
     kw = results["intent"]["keyword"]
@@ -818,7 +867,9 @@ if __name__ == "__main__":
             ml_val = ml["macro"][metric_name]
             delta = ml_val - kw_val
             sign = "+" if delta >= 0 else ""
-            print(f"  {'macro ' + metric_name:<20} {kw_val:>9.2%} {ml_val:>9.2%} {sign}{delta:>9.2%}")
+            print(
+                f"  {'macro ' + metric_name:<20} {kw_val:>9.2%} {ml_val:>9.2%} {sign}{delta:>9.2%}"
+            )
     else:
         print("  ML classifier not available")
 

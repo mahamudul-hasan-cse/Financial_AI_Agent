@@ -129,6 +129,7 @@ def stats() -> dict[str, int]:
 
 # ── yfinance helpers ─────────────────────────────────────────────────
 
+
 def _ticker(symbol: str) -> Any:
     import yfinance as yf
 
@@ -160,6 +161,4 @@ def cached_ticker_news(symbol: str) -> list[dict[str, Any]]:
 
 def cached_recommendations(symbol: str) -> "pd.DataFrame | None":
     """``yfinance.Ticker(symbol).recommendations``, cached per ticker."""
-    return get_or_set(
-        make_key("recommendations", symbol), lambda: _ticker(symbol).recommendations
-    )
+    return get_or_set(make_key("recommendations", symbol), lambda: _ticker(symbol).recommendations)

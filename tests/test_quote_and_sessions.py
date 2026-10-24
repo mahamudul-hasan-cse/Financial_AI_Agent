@@ -12,11 +12,7 @@ from research_service import build_structured_response
 
 
 def _sse_events(body: str) -> list[str]:
-    return [
-        line[len("data: "):]
-        for line in body.split("\n")
-        if line.startswith("data: ")
-    ]
+    return [line[len("data: ") :] for line in body.split("\n") if line.startswith("data: ")]
 
 
 def _ticker_meta():
@@ -67,13 +63,16 @@ class TestQuote:
 
     def test_quote_sent_in_research_sse_event(self, client, mock_agent):
         mock_agent.stream.return_value = iter(["Apple trades near $190."])
-        with patch("research_service.get_market_context", return_value=_market()), patch(
-            "backend.app.services.chat.process_nlp_and_track",
-            return_value=_nlp_schema(),
+        with (
+            patch("research_service.get_market_context", return_value=_market()),
+            patch(
+                "backend.app.services.chat.process_nlp_and_track",
+                return_value=_nlp_schema(),
+            ),
         ):
             body = client.post("/api/chat/stream", json={"message": "AAPL price"}).text
         research = next(e for e in _sse_events(body) if e.startswith("[RESEARCH_DATA]"))
-        quote = json.loads(research[len("[RESEARCH_DATA]"):])["quote"]
+        quote = json.loads(research[len("[RESEARCH_DATA]") :])["quote"]
         assert quote["symbol"] == "AAPL" and quote["closes"][-1]["close"] == 185.0
 
     def test_market_context_exposes_change_and_closes(self):
@@ -84,9 +83,11 @@ class TestQuote:
             index=pd.to_datetime(["2026-10-01", "2026-10-02", "2026-10-03"]),
         )
         info = {"currentPrice": 101.0, "regularMarketPreviousClose": 102.0, "currency": "USD"}
-        with patch("cache.cached_ticker_info", return_value=info), patch(
-            "cache.cached_ticker_history", return_value=history
-        ), patch("cache.cached_fast_info", return_value=SimpleNamespace()):
+        with (
+            patch("cache.cached_ticker_info", return_value=info),
+            patch("cache.cached_ticker_history", return_value=history),
+            patch("cache.cached_fast_info", return_value=SimpleNamespace()),
+        ):
             market = market_service.get_market_context("aapl")
         assert market["change"] == -1.0
         assert market["change_pct"] == -0.98
@@ -115,8 +116,12 @@ def _nlp_schema():
 class TestSidebarSessionActions:
     def test_rename_then_list_shows_new_title(self, client):
         sid = client.post("/api/chat", json={"message": "first"}).json()["session_id"]
-        assert client.patch(f"/api/sessions/{sid}", json={"title": "My AAPL notes"}).status_code == 200
-        titles = {s["session_id"]: s["title"] for s in client.get("/api/sessions").json()["sessions"]}
+        assert (
+            client.patch(f"/api/sessions/{sid}", json={"title": "My AAPL notes"}).status_code == 200
+        )
+        titles = {
+            s["session_id"]: s["title"] for s in client.get("/api/sessions").json()["sessions"]
+        }
         assert titles[sid] == "My AAPL notes"
 
     def test_rename_rejects_empty_title(self, client):
@@ -164,5 +169,5 @@ class TestCompanyNameQuote:
             ).text
         ctx.assert_called_with("AAPL")
         research = next(e for e in _sse_events(body) if e.startswith("[RESEARCH_DATA]"))
-        quote = json.loads(research[len("[RESEARCH_DATA]"):])["quote"]
+        quote = json.loads(research[len("[RESEARCH_DATA]") :])["quote"]
         assert quote is not None and quote["symbol"] == "AAPL"

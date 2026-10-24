@@ -11,10 +11,9 @@ Covers:
 from __future__ import annotations
 
 import logging
-from unittest.mock import patch, MagicMock, call
+from unittest.mock import MagicMock, patch
 
 import pytest
-
 from agno.agent import Agent
 from agno.tools import Toolkit
 
@@ -28,88 +27,106 @@ def _fake_groq_env(monkeypatch):
 
 # ── Module-level singleton ────────────────────────────────────────────
 
+
 class TestAgentConfiguration:
     """Tests for the agent's initialization and tool configuration."""
 
     def test_agent_is_importable(self):
         from financial_agent import agent
+
         assert agent is not None
 
     def test_agent_is_agent_instance(self):
         from financial_agent import agent
+
         assert isinstance(agent, Agent)
 
     def test_agent_has_tools(self):
         from financial_agent import agent
+
         assert agent.tools is not None
         assert len(agent.tools) > 0
 
     def test_agent_has_market_data_tools(self):
         from financial_agent import agent
+
         tool_names = [type(t).__name__ for t in agent.tools]
         assert "MarketDataTools" in tool_names
 
     def test_agent_has_duckduckgo_tools(self):
         from financial_agent import agent
+
         tool_names = [type(t).__name__ for t in agent.tools]
         assert "DuckDuckGoTools" in tool_names
 
     def test_agent_has_chart_tools(self):
         from financial_agent import agent
+
         tool_names = [type(t).__name__ for t in agent.tools]
         assert "ChartTools" in tool_names
 
     def test_agent_has_excel_tools(self):
         from financial_agent import agent
+
         tool_names = [type(t).__name__ for t in agent.tools]
         assert "ExcelTools" in tool_names
 
     def test_agent_has_rag_tools(self):
         from financial_agent import agent
+
         tool_names = [type(t).__name__ for t in agent.tools]
         assert "RAGTools" in tool_names
 
     def test_agent_uses_groq_model(self):
         from financial_agent import agent
+
         model_class = type(agent.model).__name__
         assert model_class == "Groq"
 
     def test_agent_has_instructions(self):
         from financial_agent import agent
+
         assert agent.instructions is not None
         assert len(agent.instructions) > 0
 
     def test_agent_markdown_enabled(self):
         from financial_agent import agent
+
         assert agent.markdown is True
 
     def test_agent_show_tool_calls_disabled(self):
         from financial_agent import agent
+
         assert agent.show_tool_calls is False
 
     def test_agent_builtin_history_disabled(self):
         """History is injected per session by the API, never via agno's shared memory."""
         from financial_agent import agent
+
         assert agent.add_history_to_messages is False
 
 
 # ── create_agent() factory ───────────────────────────────────────────
+
 
 class TestCreateAgent:
     """Tests for the ``create_agent()`` factory function."""
 
     def test_returns_agent_instance(self):
         from financial_agent import create_agent
+
         a = create_agent()
         assert isinstance(a, Agent)
 
     def test_uses_default_model_id(self):
-        from financial_agent import create_agent, DEFAULT_MODEL_ID
+        from financial_agent import DEFAULT_MODEL_ID, create_agent
+
         a = create_agent()
         assert a.model.id == DEFAULT_MODEL_ID
 
     def test_custom_model_id(self):
         from financial_agent import create_agent
+
         custom_id = "llama-3.3-70b-versatile"
         a = create_agent(model_id=custom_id)
         assert a.model.id == custom_id
@@ -117,17 +134,20 @@ class TestCreateAgent:
     def test_explicit_api_key_used(self):
         """Factory should accept an explicit key without needing the env var."""
         from financial_agent import create_agent
+
         a = create_agent(api_key="test-key-123")
         assert a.model.api_key == "test-key-123"
 
     def test_no_api_key_raises_runtime_error(self):
         from financial_agent import create_agent
+
         with patch.dict("os.environ", {"GROQ_API_KEY": ""}):
             with pytest.raises(RuntimeError, match="GROQ_API_KEY"):
                 create_agent(api_key=None)
 
     def test_custom_tools_override(self):
         from financial_agent import create_agent
+
         mock_tool = MagicMock(spec=Toolkit)
         a = create_agent(tools=[mock_tool])
         assert len(a.tools) == 1
@@ -135,39 +155,46 @@ class TestCreateAgent:
 
     def test_empty_tools_override(self):
         from financial_agent import create_agent
+
         a = create_agent(tools=[])
         assert a.tools == []
 
     def test_custom_instructions_override(self):
         from financial_agent import create_agent
+
         custom = ["You are a test agent."]
         a = create_agent(instructions=custom)
         assert a.instructions == custom
 
     def test_default_instructions_match_constant(self):
-        from financial_agent import create_agent, AGENT_INSTRUCTIONS
+        from financial_agent import AGENT_INSTRUCTIONS, create_agent
+
         a = create_agent()
         assert a.instructions == AGENT_INSTRUCTIONS
 
     def test_markdown_always_enabled(self):
         from financial_agent import create_agent
+
         a = create_agent()
         assert a.markdown is True
 
     def test_show_tool_calls_default(self):
         from financial_agent import create_agent
+
         a = create_agent()
         assert a.show_tool_calls is False
 
     def test_env_var_api_key_used_when_no_explicit(self):
         """Factory falls back to GROQ_API_KEY env var."""
         from financial_agent import create_agent
+
         with patch.dict("os.environ", {"GROQ_API_KEY": "env-key-456"}):
             a = create_agent(api_key=None)
             assert a.model.api_key == "env-key-456"
 
     def test_explicit_key_takes_precedence_over_env(self):
         from financial_agent import create_agent
+
         with patch.dict("os.environ", {"GROQ_API_KEY": "env-key"}):
             a = create_agent(api_key="explicit-key")
             assert a.model.api_key == "explicit-key"
@@ -175,6 +202,7 @@ class TestCreateAgent:
     def test_factory_delegates_to_build_tools(self):
         """create_agent() without explicit tools should call build_tools()."""
         from financial_agent import create_agent
+
         with patch("backend.app.agent.financial_agent.build_tools") as mock_bt:
             mock_bt.return_value = [MagicMock(spec=Toolkit)]
             a = create_agent()
@@ -183,32 +211,38 @@ class TestCreateAgent:
 
     def test_builtin_history_disabled_by_factory(self):
         from financial_agent import create_agent
+
         a = create_agent()
         assert a.add_history_to_messages is False
 
     def test_session_id_passed_to_agent(self):
         from financial_agent import create_agent
+
         a = create_agent(tools=[], session_id="sess-123")
         assert a.session_id == "sess-123"
 
 
 # ── LLM provider selection ───────────────────────────────────────────
 
+
 class TestProviderSelection:
     """LLM_PROVIDER / OLLAMA_* environment handling."""
 
     def test_llm_provider_read_from_env(self, monkeypatch):
         from config import get_llm_provider
+
         monkeypatch.setenv("LLM_PROVIDER", "ollama")
         assert get_llm_provider() == "ollama"
 
     def test_unknown_provider_falls_back_to_groq(self, monkeypatch):
         from config import get_llm_provider
+
         monkeypatch.setenv("LLM_PROVIDER", "openai")
         assert get_llm_provider() == "groq"
 
     def test_ollama_selected_when_env_set(self, monkeypatch):
         from financial_agent import create_agent
+
         monkeypatch.setenv("LLM_PROVIDER", "ollama")
         sentinel = MagicMock(name="OllamaModel")
         with patch(
@@ -219,8 +253,10 @@ class TestProviderSelection:
         assert a.model is sentinel
 
     def test_ollama_unreachable_falls_back_to_groq_with_key(self, monkeypatch):
-        from financial_agent import create_agent
         from agno.models.groq import Groq
+
+        from financial_agent import create_agent
+
         monkeypatch.setenv("LLM_PROVIDER", "ollama")
         with patch(
             "backend.app.agent.financial_agent._build_ollama_model",
@@ -231,6 +267,7 @@ class TestProviderSelection:
 
     def test_ollama_unreachable_without_groq_key_raises(self, monkeypatch):
         from financial_agent import AgentNotConfiguredError, create_agent
+
         monkeypatch.setenv("LLM_PROVIDER", "ollama")
         monkeypatch.setenv("GROQ_API_KEY", "")
         with patch(
@@ -242,6 +279,7 @@ class TestProviderSelection:
 
     def test_llm_status_reports_missing_groq_key(self, monkeypatch):
         from financial_agent import llm_status
+
         monkeypatch.setenv("GROQ_API_KEY", "")
         status = llm_status()
         assert status["provider"] == "groq"
@@ -249,6 +287,7 @@ class TestProviderSelection:
 
 
 # ── Per-session isolation ────────────────────────────────────────────
+
 
 class TestSessionIsolation:
     """Each request must run on its own Agent instance (no shared run state)."""
@@ -268,8 +307,10 @@ class TestSessionIsolation:
 
     def test_run_passes_session_id(self):
         from financial_agent import FinancialAgentService
+
         mock_agent = MagicMock()
-        result = MagicMock(); result.content = "ok"
+        result = MagicMock()
+        result.content = "ok"
         mock_agent.run.return_value = result
         svc = FinancialAgentService(agent=mock_agent)
         svc.run("hi", session_id="sess-x")
@@ -277,6 +318,7 @@ class TestSessionIsolation:
 
     def test_service_construction_does_not_build_agent(self, monkeypatch):
         from financial_agent import FinancialAgentService
+
         monkeypatch.setenv("GROQ_API_KEY", "")
         svc = FinancialAgentService()  # must not raise without a key
         assert svc._agent is None
@@ -284,40 +326,48 @@ class TestSessionIsolation:
 
 # ── FinancialAgentService ────────────────────────────────────────────
 
+
 class TestFinancialAgentService:
     """Tests for the ``FinancialAgentService`` wrapper class."""
 
     def test_service_importable(self):
         from financial_agent import FinancialAgentService
+
         assert FinancialAgentService is not None
 
     def test_service_singleton_exists(self):
-        from financial_agent import agent_service, FinancialAgentService
+        from financial_agent import FinancialAgentService, agent_service
+
         assert isinstance(agent_service, FinancialAgentService)
 
     def test_service_agent_property(self):
         from financial_agent import agent_service
+
         assert agent_service.agent is not None
         assert isinstance(agent_service.agent, Agent)
 
     def test_service_agent_matches_module_agent(self):
-        from financial_agent import agent_service, agent
+        from financial_agent import agent, agent_service
+
         assert agent_service.agent is agent
 
     def test_service_custom_agent(self):
         """Service should accept a pre-built agent."""
         from financial_agent import FinancialAgentService, create_agent
+
         custom = create_agent(model_id="llama-3.3-70b-versatile")
         svc = FinancialAgentService(agent=custom)
         assert svc.agent is custom
 
     def test_service_custom_max_retries(self):
-        from financial_agent import FinancialAgentService, create_agent
+        from financial_agent import FinancialAgentService
+
         svc = FinancialAgentService(max_retries=5)
         assert svc._max_retries == 5
 
     def test_run_returns_string(self):
         from financial_agent import FinancialAgentService
+
         mock_agent = MagicMock()
         result = MagicMock()
         result.content = "Hello from agent"
@@ -330,6 +380,7 @@ class TestFinancialAgentService:
 
     def test_run_retries_on_failure(self):
         from financial_agent import FinancialAgentService
+
         mock_agent = MagicMock()
         good = MagicMock()
         good.content = "recovered"
@@ -342,6 +393,7 @@ class TestFinancialAgentService:
 
     def test_run_exhausts_retries(self):
         from financial_agent import FinancialAgentService
+
         mock_agent = MagicMock()
         mock_agent.run.side_effect = RuntimeError("persistent")
 
@@ -352,6 +404,7 @@ class TestFinancialAgentService:
 
     def test_run_falls_back_to_str_if_no_content(self):
         from financial_agent import FinancialAgentService
+
         mock_agent = MagicMock()
         mock_agent.run.return_value = 42  # no .content attribute
 
@@ -361,6 +414,7 @@ class TestFinancialAgentService:
 
     def test_stream_yields_strings(self):
         from financial_agent import FinancialAgentService
+
         mock_agent = MagicMock()
         c1, c2 = MagicMock(), MagicMock()
         c1.content = "Hello "
@@ -374,6 +428,7 @@ class TestFinancialAgentService:
 
     def test_stream_error_yields_sentinel(self):
         from financial_agent import FinancialAgentService
+
         mock_agent = MagicMock()
         mock_agent.run.side_effect = RuntimeError("boom")
 
@@ -384,6 +439,7 @@ class TestFinancialAgentService:
 
     def test_stream_skips_empty_chunks(self):
         from financial_agent import FinancialAgentService
+
         mock_agent = MagicMock()
         c1 = MagicMock()
         c1.content = ""
@@ -398,16 +454,19 @@ class TestFinancialAgentService:
     # ── Query execution & retry behaviour ─────────────────────────
 
     def test_service_default_max_retries(self):
-        from financial_agent import FinancialAgentService
         from backend.app.agent.financial_agent import _DEFAULT_MAX_RETRIES
+        from financial_agent import FinancialAgentService
+
         mock_agent = MagicMock()
         svc = FinancialAgentService(agent=mock_agent)
         assert svc._max_retries == _DEFAULT_MAX_RETRIES
 
     def test_run_calls_agent_with_stream_false(self):
         from financial_agent import FinancialAgentService
+
         mock_agent = MagicMock()
-        result = MagicMock(); result.content = "response"
+        result = MagicMock()
+        result.content = "response"
         mock_agent.run.return_value = result
         svc = FinancialAgentService(agent=mock_agent)
         svc.run("hello")
@@ -416,8 +475,10 @@ class TestFinancialAgentService:
     def test_run_succeeds_first_attempt_count(self):
         """Successful first attempt should NOT trigger additional retries."""
         from financial_agent import FinancialAgentService
+
         mock_agent = MagicMock()
-        result = MagicMock(); result.content = "ok"
+        result = MagicMock()
+        result.content = "ok"
         mock_agent.run.return_value = result
         svc = FinancialAgentService(agent=mock_agent, max_retries=3)
         svc.run("prompt")
@@ -426,6 +487,7 @@ class TestFinancialAgentService:
     def test_run_multiple_sequential_calls(self):
         """Service should handle successive calls on the same instance."""
         from financial_agent import FinancialAgentService
+
         mock_agent = MagicMock()
         r1, r2 = MagicMock(), MagicMock()
         r1.content = "first"
@@ -437,6 +499,7 @@ class TestFinancialAgentService:
 
     def test_stream_calls_agent_with_stream_true(self):
         from financial_agent import FinancialAgentService
+
         mock_agent = MagicMock()
         mock_agent.run.return_value = []
         svc = FinancialAgentService(agent=mock_agent)
@@ -446,6 +509,7 @@ class TestFinancialAgentService:
     def test_stream_handles_plain_string_chunks(self):
         """Chunks that are plain strings (not objects with .content) should work."""
         from financial_agent import FinancialAgentService
+
         mock_agent = MagicMock()
         mock_agent.run.return_value = ["chunk1", "chunk2"]
         svc = FinancialAgentService(agent=mock_agent)
@@ -455,6 +519,7 @@ class TestFinancialAgentService:
     def test_stream_retries_before_output_with_status(self):
         """Failures before any text are retried max_retries times, each announced."""
         from financial_agent import FinancialAgentService
+
         mock_agent = MagicMock()
         mock_agent.run.side_effect = RuntimeError("stream fail")
         svc = FinancialAgentService(agent=mock_agent, max_retries=5)
@@ -465,16 +530,20 @@ class TestFinancialAgentService:
 
     def test_run_retries_on_connection_error(self):
         from financial_agent import FinancialAgentService
+
         mock_agent = MagicMock()
-        good = MagicMock(); good.content = "ok"
+        good = MagicMock()
+        good.content = "ok"
         mock_agent.run.side_effect = [ConnectionError("conn"), good]
         svc = FinancialAgentService(agent=mock_agent, max_retries=3)
         assert svc.run("test") == "ok"
 
     def test_run_retries_on_timeout_error(self):
         from financial_agent import FinancialAgentService
+
         mock_agent = MagicMock()
-        good = MagicMock(); good.content = "recovered"
+        good = MagicMock()
+        good.content = "recovered"
         mock_agent.run.side_effect = [TimeoutError("timeout"), good]
         svc = FinancialAgentService(agent=mock_agent, max_retries=3)
         assert svc.run("test") == "recovered"
@@ -482,6 +551,7 @@ class TestFinancialAgentService:
     def test_run_exhausted_chains_original_cause(self):
         """RuntimeError from exhausted retries should chain the original exception."""
         from financial_agent import FinancialAgentService
+
         mock_agent = MagicMock()
         original = ValueError("original cause")
         mock_agent.run.side_effect = original
@@ -492,6 +562,7 @@ class TestFinancialAgentService:
 
     def test_run_max_retries_zero_makes_single_attempt(self):
         from financial_agent import FinancialAgentService
+
         mock_agent = MagicMock()
         mock_agent.run.side_effect = RuntimeError("fail")
         svc = FinancialAgentService(agent=mock_agent, max_retries=0)
@@ -502,10 +573,12 @@ class TestFinancialAgentService:
     def test_stream_mid_stream_error(self):
         """If error occurs mid-stream, sentinel appears after partial chunks."""
         from financial_agent import FinancialAgentService
+
         mock_agent = MagicMock()
 
         def failing_iter(*args, **kwargs):
-            c = MagicMock(); c.content = "partial"
+            c = MagicMock()
+            c.content = "partial"
             yield c
             raise RuntimeError("mid-stream failure")
 
@@ -517,8 +590,10 @@ class TestFinancialAgentService:
 
     def test_run_logs_success_on_first_attempt(self, caplog):
         from financial_agent import FinancialAgentService
+
         mock_agent = MagicMock()
-        result = MagicMock(); result.content = "done"
+        result = MagicMock()
+        result.content = "done"
         mock_agent.run.return_value = result
         svc = FinancialAgentService(agent=mock_agent)
         with caplog.at_level(logging.INFO, logger="financial_agent"):
@@ -527,8 +602,10 @@ class TestFinancialAgentService:
 
     def test_run_logs_warning_on_retry(self, caplog):
         from financial_agent import FinancialAgentService
+
         mock_agent = MagicMock()
-        good = MagicMock(); good.content = "ok"
+        good = MagicMock()
+        good.content = "ok"
         mock_agent.run.side_effect = [RuntimeError("fail"), good]
         svc = FinancialAgentService(agent=mock_agent, max_retries=3)
         with caplog.at_level(logging.WARNING, logger="financial_agent"):
@@ -537,6 +614,7 @@ class TestFinancialAgentService:
 
     def test_stream_logs_exception_on_error(self, caplog):
         from financial_agent import FinancialAgentService
+
         mock_agent = MagicMock()
         mock_agent.run.side_effect = RuntimeError("boom")
         svc = FinancialAgentService(agent=mock_agent)
@@ -547,21 +625,25 @@ class TestFinancialAgentService:
 
 # ── _build_tools() registration ──────────────────────────────────────
 
+
 class TestBuildTools:
     """Tests for ``_build_tools()`` toolkit construction."""
 
     def test_returns_list(self):
         from financial_agent import _build_tools
+
         result = _build_tools()
         assert isinstance(result, list)
 
     def test_all_five_toolkits_loaded(self):
         from financial_agent import _build_tools
+
         tools = _build_tools()
         assert len(tools) == 5
 
     def test_toolkit_types(self):
         from financial_agent import _build_tools
+
         tools = _build_tools()
         type_names = {type(t).__name__ for t in tools}
         expected = {"DuckDuckGoTools", "MarketDataTools", "ChartTools", "ExcelTools", "RAGTools"}
@@ -569,44 +651,52 @@ class TestBuildTools:
 
     def test_each_element_is_toolkit_subclass(self):
         from financial_agent import _build_tools
+
         for tool in _build_tools():
             assert isinstance(tool, Toolkit)
 
     def test_custom_factories_parameter(self):
         """build_tools() accepts an explicit factories list."""
         from backend.app.agent.tool_registry import build_tools
-        mock_factory = lambda: MagicMock(spec=Toolkit)
+
+        mock_factory = lambda: MagicMock(spec=Toolkit)  # noqa: E731
         tools = build_tools(factories=[("Test", mock_factory)])
         assert len(tools) == 1
 
     def test_returns_fresh_list_each_call(self):
         """Successive calls should return independent lists (no shared state)."""
         from financial_agent import _build_tools
+
         list1 = _build_tools()
         list2 = _build_tools()
         assert list1 is not list2
 
     def test_empty_factories_returns_empty(self):
         from backend.app.agent.tool_registry import build_tools
+
         tools = build_tools(factories=[])
         assert tools == []
 
 
 # ── TOOL_FACTORIES registry structure ────────────────────────────────
 
+
 class TestToolFactories:
     """Validate the TOOL_FACTORIES registry structure and contents."""
 
     def test_factories_is_list(self):
         from backend.app.agent.tool_registry import TOOL_FACTORIES
+
         assert isinstance(TOOL_FACTORIES, list)
 
     def test_expected_factory_count(self):
         from backend.app.agent.tool_registry import TOOL_FACTORIES
+
         assert len(TOOL_FACTORIES) == 5
 
     def test_each_entry_is_name_callable_pair(self):
         from backend.app.agent.tool_registry import TOOL_FACTORIES
+
         for entry in TOOL_FACTORIES:
             assert isinstance(entry, tuple) and len(entry) == 2
             name, factory = entry
@@ -615,17 +705,20 @@ class TestToolFactories:
 
     def test_factory_names_are_unique(self):
         from backend.app.agent.tool_registry import TOOL_FACTORIES
+
         names = [name for name, _ in TOOL_FACTORIES]
         assert len(names) == len(set(names))
 
     def test_factory_names_match_expected(self):
         from backend.app.agent.tool_registry import TOOL_FACTORIES
+
         names = {name for name, _ in TOOL_FACTORIES}
         assert names == {"DuckDuckGo", "MarketData", "Charts", "Excel", "RAG"}
 
     def test_each_factory_produces_toolkit(self):
         """Every registered factory should produce a valid Toolkit instance."""
         from backend.app.agent.tool_registry import TOOL_FACTORIES
+
         for name, factory in TOOL_FACTORIES:
             tool = factory()
             assert isinstance(tool, Toolkit), f"{name} factory did not produce a Toolkit"
@@ -633,13 +726,17 @@ class TestToolFactories:
 
 # ── Tool failure handling (graceful degradation) ─────────────────────
 
+
 class TestToolFailureHandling:
     """Tests for _build_tools() when individual toolkits fail to load."""
 
     def test_skips_single_failing_toolkit(self):
         """If one toolkit factory raises, the others should still load."""
         from financial_agent import _build_tools
-        with patch("backend.app.agent.tool_registry.ChartTools", side_effect=ImportError("no matplotlib")):
+
+        with patch(
+            "backend.app.agent.tool_registry.ChartTools", side_effect=ImportError("no matplotlib")
+        ):
             tools = _build_tools()
             type_names = {type(t).__name__ for t in tools}
             assert "ChartTools" not in type_names
@@ -647,8 +744,11 @@ class TestToolFailureHandling:
 
     def test_skips_multiple_failing_toolkits(self):
         from financial_agent import _build_tools
-        with patch("backend.app.agent.tool_registry.ChartTools", side_effect=ImportError), \
-             patch("backend.app.agent.tool_registry.ExcelTools", side_effect=OSError):
+
+        with (
+            patch("backend.app.agent.tool_registry.ChartTools", side_effect=ImportError),
+            patch("backend.app.agent.tool_registry.ExcelTools", side_effect=OSError),
+        ):
             tools = _build_tools()
             assert len(tools) == 3
             type_names = {type(t).__name__ for t in tools}
@@ -657,23 +757,30 @@ class TestToolFailureHandling:
 
     def test_returns_empty_when_all_fail(self):
         from financial_agent import _build_tools
-        with patch("backend.app.agent.tool_registry.DuckDuckGoTools", side_effect=Exception), \
-             patch("backend.app.agent.tool_registry.MarketDataTools", side_effect=Exception), \
-             patch("backend.app.agent.tool_registry.ChartTools", side_effect=Exception), \
-             patch("backend.app.agent.tool_registry.ExcelTools", side_effect=Exception), \
-             patch("backend.app.agent.tool_registry.RAGTools", side_effect=Exception):
+
+        with (
+            patch("backend.app.agent.tool_registry.DuckDuckGoTools", side_effect=Exception),
+            patch("backend.app.agent.tool_registry.MarketDataTools", side_effect=Exception),
+            patch("backend.app.agent.tool_registry.ChartTools", side_effect=Exception),
+            patch("backend.app.agent.tool_registry.ExcelTools", side_effect=Exception),
+            patch("backend.app.agent.tool_registry.RAGTools", side_effect=Exception),
+        ):
             tools = _build_tools()
             assert tools == []
 
     def test_logs_warning_on_failure(self, caplog):
         from financial_agent import _build_tools
-        with caplog.at_level(logging.WARNING, logger="financial_agent"), \
-             patch("backend.app.agent.tool_registry.RAGTools", side_effect=RuntimeError("boom")):
+
+        with (
+            caplog.at_level(logging.WARNING, logger="financial_agent"),
+            patch("backend.app.agent.tool_registry.RAGTools", side_effect=RuntimeError("boom")),
+        ):
             _build_tools()
         assert any("Failed to load toolkit 'RAG'" in msg for msg in caplog.messages)
 
     def test_logs_debug_on_success(self, caplog):
         from financial_agent import _build_tools
+
         with caplog.at_level(logging.DEBUG, logger="financial_agent"):
             _build_tools()
         loaded = [m for m in caplog.messages if m.startswith("Loaded toolkit")]
@@ -682,6 +789,7 @@ class TestToolFailureHandling:
     def test_remaining_tools_still_functional_after_failure(self):
         """Ensure the loaded tools are real, working instances (not broken proxies)."""
         from financial_agent import _build_tools
+
         with patch("backend.app.agent.tool_registry.ChartTools", side_effect=ImportError):
             tools = _build_tools()
             for t in tools:
@@ -691,6 +799,7 @@ class TestToolFailureHandling:
     def test_order_preserved_after_middle_failure(self):
         """If the 3rd toolkit fails, tools 1-2 and 4-5 keep their original order."""
         from backend.app.agent.tool_registry import build_tools
+
         with patch("backend.app.agent.tool_registry.ChartTools", side_effect=ImportError):
             tools = build_tools()
         names = [type(t).__name__ for t in tools]
@@ -699,22 +808,26 @@ class TestToolFailureHandling:
 
 # ── Response packaging (AGENT_INSTRUCTIONS content) ──────────────────
 
+
 class TestResponsePackaging:
     """Verify AGENT_INSTRUCTIONS instructs the agent to format output properly."""
 
     def test_instructions_is_list_of_strings(self):
         from financial_agent import AGENT_INSTRUCTIONS
+
         assert isinstance(AGENT_INSTRUCTIONS, list)
         assert all(isinstance(s, str) for s in AGENT_INSTRUCTIONS)
 
     def test_instructions_mention_tool_categories(self):
         from financial_agent import AGENT_INSTRUCTIONS
+
         joined = "\n".join(AGENT_INSTRUCTIONS)
         for keyword in ["Stock data", "Search", "Charts", "Excel", "Knowledge retrieval"]:
             assert keyword in joined, f"Missing tool category: {keyword}"
 
     def test_instructions_contain_chart_directive(self):
         from financial_agent import AGENT_INSTRUCTIONS
+
         joined = "\n".join(AGENT_INSTRUCTIONS)
         assert "create_stock_chart" in joined
         assert "Do not show file names" in joined
@@ -722,28 +835,33 @@ class TestResponsePackaging:
 
     def test_instructions_contain_excel_directive(self):
         from financial_agent import AGENT_INSTRUCTIONS
+
         joined = "\n".join(AGENT_INSTRUCTIONS)
         assert "create_stock_excel_report" in joined
         assert "Do not show file names" in joined
 
     def test_instructions_contain_disclaimer(self):
         from financial_agent import AGENT_INSTRUCTIONS
+
         joined = "\n".join(AGENT_INSTRUCTIONS)
         assert "informational purposes only" in joined
 
     def test_instructions_never_say_cannot(self):
         """Agent must be instructed to never claim inability to create charts/sheets."""
         from financial_agent import AGENT_INSTRUCTIONS
+
         joined = "\n".join(AGENT_INSTRUCTIONS)
         assert "Never say you cannot create charts or spreadsheets" in joined
 
     def test_instructions_require_dollar_sign_prices(self):
         from financial_agent import AGENT_INSTRUCTIONS
+
         joined = "\n".join(AGENT_INSTRUCTIONS)
         assert "$ symbols" in joined
 
     def test_instructions_require_tables(self):
         from financial_agent import AGENT_INSTRUCTIONS
+
         joined = "\n".join(AGENT_INSTRUCTIONS)
         assert "Key Data" in joined
         assert "tables" in joined.lower()
@@ -751,65 +869,82 @@ class TestResponsePackaging:
 
 # ── Prompts data module ──────────────────────────────────────────────
 
+
 class TestPromptsModule:
     """Tests for the prompts.py pure-data module."""
 
     def test_tool_catalogue_is_non_empty_string(self):
         from backend.app.agent.prompts import TOOL_CATALOGUE
+
         assert isinstance(TOOL_CATALOGUE, str)
         assert len(TOOL_CATALOGUE) > 0
 
     def test_behavioural_rules_is_non_empty_string(self):
         from backend.app.agent.prompts import BEHAVIOURAL_RULES
+
         assert isinstance(BEHAVIOURAL_RULES, str)
         assert len(BEHAVIOURAL_RULES) > 0
 
     def test_agent_instructions_contains_tool_catalogue(self):
         from backend.app.agent.prompts import AGENT_INSTRUCTIONS, TOOL_CATALOGUE
+
         assert TOOL_CATALOGUE in AGENT_INSTRUCTIONS
 
     def test_agent_instructions_contains_behavioural_rules(self):
         from backend.app.agent.prompts import AGENT_INSTRUCTIONS, BEHAVIOURAL_RULES
+
         assert BEHAVIOURAL_RULES in AGENT_INSTRUCTIONS
 
     def test_prompts_module_all_exports(self):
         from backend.app.agent import prompts
+
         expected = {"TOOL_CATALOGUE", "BEHAVIOURAL_RULES", "AGENT_INSTRUCTIONS"}
         assert expected == set(prompts.__all__)
 
     def test_tool_catalogue_lists_all_five_categories(self):
         from backend.app.agent.prompts import TOOL_CATALOGUE
+
         for category in ["Stock data", "Search", "Charts", "Excel", "Knowledge retrieval"]:
             assert category in TOOL_CATALOGUE, f"Missing category: {category}"
 
     def test_behavioural_rules_mention_chart_and_spreadsheet(self):
         from backend.app.agent.prompts import BEHAVIOURAL_RULES
+
         assert "chart" in BEHAVIOURAL_RULES.lower()
         assert "spreadsheet" in BEHAVIOURAL_RULES.lower() or "excel" in BEHAVIOURAL_RULES.lower()
 
     def test_instructions_separator_between_fragments(self):
         """AGENT_INSTRUCTIONS should have a blank separator between fragments."""
         from backend.app.agent.prompts import AGENT_INSTRUCTIONS
+
         assert "" in AGENT_INSTRUCTIONS
 
 
 # ── Tool-registry module ─────────────────────────────────────────────
+
 
 class TestToolRegistryModule:
     """Tests for tool_registry.py module-level exports."""
 
     def test_module_all_exports(self):
         from backend.app.agent import tool_registry
+
         assert set(tool_registry.__all__) == {
-            "build_tools", "compact_tool_output", "truncate_output", "TOOL_FACTORIES", "SEARCH_MAX_RESULTS"
+            "build_tools",
+            "compact_tool_output",
+            "truncate_output",
+            "TOOL_FACTORIES",
+            "SEARCH_MAX_RESULTS",
         }
 
     def test_build_tools_is_callable(self):
         from backend.app.agent.tool_registry import build_tools
+
         assert callable(build_tools)
 
 
 # ── Invalid input handling ───────────────────────────────────────────
+
 
 class TestInvalidInputs:
     """Tests for edge cases and bad inputs to the public API."""
@@ -817,52 +952,68 @@ class TestInvalidInputs:
     def test_create_agent_empty_model_id_accepted(self):
         """Agent factory doesn't validate model IDs—that's Groq's job."""
         from financial_agent import create_agent
+
         a = create_agent(model_id="")
         assert a.model.id == ""
 
     def test_create_agent_none_tools_builds_defaults(self):
         from financial_agent import create_agent
+
         a = create_agent(tools=None)
         assert len(a.tools) == 5
 
     def test_create_agent_none_instructions_uses_defaults(self):
-        from financial_agent import create_agent, AGENT_INSTRUCTIONS
+        from financial_agent import AGENT_INSTRUCTIONS, create_agent
+
         a = create_agent(instructions=None)
         assert a.instructions == AGENT_INSTRUCTIONS
 
 
 # ── CLI ──────────────────────────────────────────────────────────────
 
+
 class TestCLI:
     """Tests for the CLI entry point."""
 
     def test_main_with_query_arg(self):
         from financial_agent import main
-        with patch("backend.app.agent.financial_agent.agent") as mock_agent, \
-             patch("sys.argv", ["financial_agent.py", "What is AAPL?"]):
+
+        with (
+            patch("backend.app.agent.financial_agent.agent") as mock_agent,
+            patch("sys.argv", ["financial_agent.py", "What is AAPL?"]),
+        ):
             main()
             mock_agent.print_response.assert_called_once_with("What is AAPL?", stream=False)
 
     def test_main_with_stream_flag(self):
         from financial_agent import main
-        with patch("backend.app.agent.financial_agent.agent") as mock_agent, \
-             patch("sys.argv", ["financial_agent.py", "--stream", "Hello"]):
+
+        with (
+            patch("backend.app.agent.financial_agent.agent") as mock_agent,
+            patch("sys.argv", ["financial_agent.py", "--stream", "Hello"]),
+        ):
             main()
             mock_agent.print_response.assert_called_once_with("Hello", stream=True)
 
     def test_main_no_query_enters_interactive(self):
         from financial_agent import main
-        with patch("backend.app.agent.financial_agent.agent"), \
-             patch("backend.app.agent.financial_agent._interactive_loop") as mock_loop, \
-             patch("sys.argv", ["financial_agent.py"]):
+
+        with (
+            patch("backend.app.agent.financial_agent.agent"),
+            patch("backend.app.agent.financial_agent._interactive_loop") as mock_loop,
+            patch("sys.argv", ["financial_agent.py"]),
+        ):
             main()
             mock_loop.assert_called_once_with(stream=False)
 
     def test_main_stream_flag_passed_to_interactive(self):
         from financial_agent import main
-        with patch("backend.app.agent.financial_agent.agent"), \
-             patch("backend.app.agent.financial_agent._interactive_loop") as mock_loop, \
-             patch("sys.argv", ["financial_agent.py", "--stream"]):
+
+        with (
+            patch("backend.app.agent.financial_agent.agent"),
+            patch("backend.app.agent.financial_agent._interactive_loop") as mock_loop,
+            patch("sys.argv", ["financial_agent.py", "--stream"]),
+        ):
             main()
             mock_loop.assert_called_once_with(stream=True)
 
@@ -872,60 +1023,72 @@ class TestInteractiveLoop:
 
     def test_exit_command_breaks_loop(self):
         from financial_agent import _interactive_loop
-        with patch("builtins.input", return_value="exit"), \
-             patch("builtins.print") as mock_print:
+
+        with patch("builtins.input", return_value="exit"), patch("builtins.print") as mock_print:
             _interactive_loop()
             mock_print.assert_any_call("Goodbye!")
 
     def test_quit_command_breaks_loop(self):
         from financial_agent import _interactive_loop
-        with patch("builtins.input", return_value="quit"), \
-             patch("builtins.print"):
+
+        with patch("builtins.input", return_value="quit"), patch("builtins.print"):
             _interactive_loop()
 
     def test_empty_input_breaks_loop(self):
         from financial_agent import _interactive_loop
-        with patch("builtins.input", return_value=""), \
-             patch("builtins.print"):
+
+        with patch("builtins.input", return_value=""), patch("builtins.print"):
             _interactive_loop()
 
     def test_keyboard_interrupt_handled(self):
         from financial_agent import _interactive_loop
-        with patch("builtins.input", side_effect=KeyboardInterrupt), \
-             patch("builtins.print") as mock_print:
+
+        with (
+            patch("builtins.input", side_effect=KeyboardInterrupt),
+            patch("builtins.print") as mock_print,
+        ):
             _interactive_loop()
             mock_print.assert_any_call("\nGoodbye!")
 
     def test_eof_error_handled(self):
         from financial_agent import _interactive_loop
-        with patch("builtins.input", side_effect=EOFError), \
-             patch("builtins.print") as mock_print:
+
+        with patch("builtins.input", side_effect=EOFError), patch("builtins.print") as mock_print:
             _interactive_loop()
             mock_print.assert_any_call("\nGoodbye!")
 
     def test_valid_query_calls_print_response(self):
         from financial_agent import _interactive_loop
+
         # First call returns a query, second returns "exit"
-        with patch("builtins.input", side_effect=["What is AAPL?", "exit"]), \
-             patch("builtins.print"), \
-             patch("backend.app.agent.financial_agent.agent") as mock_agent:
+        with (
+            patch("builtins.input", side_effect=["What is AAPL?", "exit"]),
+            patch("builtins.print"),
+            patch("backend.app.agent.financial_agent.agent") as mock_agent,
+        ):
             _interactive_loop(stream=False)
             mock_agent.print_response.assert_called_once_with("What is AAPL?", stream=False)
 
     def test_valid_query_streams_when_flag_set(self):
         from financial_agent import _interactive_loop
-        with patch("builtins.input", side_effect=["Show me TSLA", "exit"]), \
-             patch("builtins.print"), \
-             patch("backend.app.agent.financial_agent.agent") as mock_agent:
+
+        with (
+            patch("builtins.input", side_effect=["Show me TSLA", "exit"]),
+            patch("builtins.print"),
+            patch("backend.app.agent.financial_agent.agent") as mock_agent,
+        ):
             _interactive_loop(stream=True)
             mock_agent.print_response.assert_called_once_with("Show me TSLA", stream=True)
 
     def test_agent_error_does_not_crash_loop(self):
         """Runtime errors from the agent are caught; the loop continues."""
         from financial_agent import _interactive_loop
-        with patch("builtins.input", side_effect=["bad query", "exit"]), \
-             patch("builtins.print") as mock_print, \
-             patch("backend.app.agent.financial_agent.agent") as mock_agent:
+
+        with (
+            patch("builtins.input", side_effect=["bad query", "exit"]),
+            patch("builtins.print") as mock_print,
+            patch("backend.app.agent.financial_agent.agent") as mock_agent,
+        ):
             mock_agent.print_response.side_effect = RuntimeError("LLM timeout")
             _interactive_loop()
             # Loop should still exit normally after the error

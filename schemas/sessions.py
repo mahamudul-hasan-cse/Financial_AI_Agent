@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
-from schemas.chat import ExportMessage
-from schemas.research import ResearchResponse
+from schemas.chat import ExportMessage  # noqa: F401
 from schemas.nlp import NLPMetadataSchema
+from schemas.research import ResearchResponse
 
 
 class SessionMessage(BaseModel):
@@ -48,4 +48,3 @@ class SessionRenameRequest(BaseModel):
     """Rename request for a saved session."""
 
     title: str = Field(..., min_length=1, max_length=120)
-

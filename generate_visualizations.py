@@ -14,15 +14,13 @@ Run directly: python generate_visualizations.py
 from __future__ import annotations
 
 import os
-import sys
-
-import numpy as np
 
 # Ensure non-interactive backend before importing pyplot
 import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
+import numpy as np
 
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt  # noqa: E402
 
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "outputs", "figures")
 
@@ -46,7 +44,9 @@ def plot_confusion_matrix(save: bool = True) -> str:
 
     fig, ax = plt.subplots(figsize=(10, 8))
     im = ax.imshow(matrix, interpolation="nearest", cmap=plt.cm.Blues)
-    ax.set_title("Intent Classification — Confusion Matrix\n(TF-IDF + Logistic Regression)", fontsize=13)
+    ax.set_title(
+        "Intent Classification — Confusion Matrix\n(TF-IDF + Logistic Regression)", fontsize=13
+    )
     plt.colorbar(im, ax=ax)
 
     tick_marks = np.arange(len(labels))
@@ -59,10 +59,15 @@ def plot_confusion_matrix(save: bool = True) -> str:
     thresh = matrix.max() / 2.0
     for i in range(matrix.shape[0]):
         for j in range(matrix.shape[1]):
-            ax.text(j, i, str(matrix[i, j]),
-                    ha="center", va="center",
-                    color="white" if matrix[i, j] > thresh else "black",
-                    fontsize=10)
+            ax.text(
+                j,
+                i,
+                str(matrix[i, j]),
+                ha="center",
+                va="center",
+                color="white" if matrix[i, j] > thresh else "black",
+                fontsize=10,
+            )
 
     ax.set_ylabel("True Label")
     ax.set_xlabel("Predicted Label")
@@ -78,10 +83,11 @@ def plot_confusion_matrix(save: bool = True) -> str:
 
 def plot_learning_curve(save: bool = True) -> str:
     """2. Learning curve — train/val accuracy vs training set fraction."""
-    from sklearn.model_selection import StratifiedKFold
     from sklearn.feature_extraction.text import TfidfVectorizer
     from sklearn.linear_model import LogisticRegression
+    from sklearn.model_selection import StratifiedKFold
     from sklearn.pipeline import Pipeline as SkPipeline
+
     from intent_classifier import TRAINING_DATA, preprocess_text
 
     texts = [preprocess_text(t) for t, _ in TRAINING_DATA]
@@ -105,15 +111,28 @@ def plot_learning_curve(save: bool = True) -> str:
             val_texts = [texts[i] for i in val_idx]
             val_labels = [labels[i] for i in val_idx]
 
-            pipe = SkPipeline([
-                ("tfidf", TfidfVectorizer(ngram_range=(1, 2), max_features=5000,
-                                          stop_words="english", sublinear_tf=True)),
-                ("clf", LogisticRegression(max_iter=1000, C=5.0, solver="lbfgs")),
-            ])
+            pipe = SkPipeline(
+                [
+                    (
+                        "tfidf",
+                        TfidfVectorizer(
+                            ngram_range=(1, 2),
+                            max_features=5000,
+                            stop_words="english",
+                            sublinear_tf=True,
+                        ),
+                    ),
+                    ("clf", LogisticRegression(max_iter=1000, C=5.0, solver="lbfgs")),
+                ]
+            )
             pipe.fit(train_texts, train_labels)
 
-            t_acc = sum(1 for p, t in zip(pipe.predict(train_texts), train_labels) if p == t) / len(train_labels)
-            v_acc = sum(1 for p, t in zip(pipe.predict(val_texts), val_labels) if p == t) / len(val_labels)
+            t_acc = sum(1 for p, t in zip(pipe.predict(train_texts), train_labels) if p == t) / len(
+                train_labels
+            )
+            v_acc = sum(1 for p, t in zip(pipe.predict(val_texts), val_labels) if p == t) / len(
+                val_labels
+            )
             t_scores.append(t_acc)
             v_scores.append(v_acc)
 
@@ -125,14 +144,20 @@ def plot_learning_curve(save: bool = True) -> str:
     train_sizes = [int(f * len(texts) * 0.8) for f in fractions]  # approx per fold
 
     fig, ax = plt.subplots(figsize=(9, 6))
-    ax.fill_between(train_sizes,
-                     np.array(train_means) - np.array(train_stds),
-                     np.array(train_means) + np.array(train_stds),
-                     alpha=0.15, color="blue")
-    ax.fill_between(train_sizes,
-                     np.array(val_means) - np.array(val_stds),
-                     np.array(val_means) + np.array(val_stds),
-                     alpha=0.15, color="orange")
+    ax.fill_between(
+        train_sizes,
+        np.array(train_means) - np.array(train_stds),
+        np.array(train_means) + np.array(train_stds),
+        alpha=0.15,
+        color="blue",
+    )
+    ax.fill_between(
+        train_sizes,
+        np.array(val_means) - np.array(val_stds),
+        np.array(val_means) + np.array(val_stds),
+        alpha=0.15,
+        color="orange",
+    )
     ax.plot(train_sizes, train_means, "o-", color="blue", label="Training accuracy")
     ax.plot(train_sizes, val_means, "o-", color="orange", label="Validation accuracy")
     ax.set_xlabel("Training Set Size")
@@ -172,8 +197,7 @@ def plot_hyperparameter_sensitivity(save: bool = True) -> str:
     colors = ["#2196F3", "#FF9800", "#4CAF50"]
 
     for (key, (cs, accs, stds)), color in zip(ngram_groups.items(), colors):
-        ax.errorbar(cs, accs, yerr=stds, marker="o", label=f"ngram={key}",
-                    capsize=3, color=color)
+        ax.errorbar(cs, accs, yerr=stds, marker="o", label=f"ngram={key}", capsize=3, color=color)
 
     ax.set_xscale("log")
     ax.set_xlabel("Regularization Strength (C) — log scale")
@@ -184,8 +208,7 @@ def plot_hyperparameter_sensitivity(save: bool = True) -> str:
 
     # Mark best
     best = results["best_params"]
-    ax.axvline(x=best["C"], color="red", linestyle="--", alpha=0.5,
-               label=f"Best C={best['C']}")
+    ax.axvline(x=best["C"], color="red", linestyle="--", alpha=0.5, label=f"Best C={best['C']}")
     ax.legend()
     plt.tight_layout()
 
@@ -210,15 +233,17 @@ def plot_per_class_f1(save: bool = True) -> str:
         return ""
 
     labels = sorted(kw["per_class"].keys())
-    kw_f1 = [kw["per_class"][l]["f1"] for l in labels]
-    ml_f1 = [ml["per_class"][l]["f1"] for l in labels]
+    kw_f1 = [kw["per_class"][l]["f1"] for l in labels]  # noqa: E741
+    ml_f1 = [ml["per_class"][l]["f1"] for l in labels]  # noqa: E741
 
     x = np.arange(len(labels))
     width = 0.35
 
     fig, ax = plt.subplots(figsize=(11, 6))
     bars1 = ax.bar(x - width / 2, kw_f1, width, label="Keyword", color="#FF9800", alpha=0.85)
-    bars2 = ax.bar(x + width / 2, ml_f1, width, label="ML (TF-IDF + LogReg)", color="#2196F3", alpha=0.85)
+    bars2 = ax.bar(
+        x + width / 2, ml_f1, width, label="ML (TF-IDF + LogReg)", color="#2196F3", alpha=0.85
+    )
 
     ax.set_ylabel("F1 Score")
     ax.set_title("Per-Class F1 Score — ML vs Keyword Classifier")
@@ -231,12 +256,24 @@ def plot_per_class_f1(save: bool = True) -> str:
     # Value labels
     for bar in bars1:
         h = bar.get_height()
-        ax.text(bar.get_x() + bar.get_width() / 2, h + 0.02, f"{h:.2f}",
-                ha="center", va="bottom", fontsize=8)
+        ax.text(
+            bar.get_x() + bar.get_width() / 2,
+            h + 0.02,
+            f"{h:.2f}",
+            ha="center",
+            va="bottom",
+            fontsize=8,
+        )
     for bar in bars2:
         h = bar.get_height()
-        ax.text(bar.get_x() + bar.get_width() / 2, h + 0.02, f"{h:.2f}",
-                ha="center", va="bottom", fontsize=8)
+        ax.text(
+            bar.get_x() + bar.get_width() / 2,
+            h + 0.02,
+            f"{h:.2f}",
+            ha="center",
+            va="bottom",
+            fontsize=8,
+        )
 
     plt.tight_layout()
     path = os.path.join(OUTPUT_DIR, "per_class_f1.png")

@@ -58,20 +58,34 @@ def render_chat_pdf(history: list[dict[str, str]], session_id: str) -> Path:
 
     styles = getSampleStyleSheet()
     title_style = ParagraphStyle(
-        "ChatTitle", parent=styles["Title"], fontSize=16,
-        textColor=HexColor("#4f46e5"), spaceAfter=12,
+        "ChatTitle",
+        parent=styles["Title"],
+        fontSize=16,
+        textColor=HexColor("#4f46e5"),
+        spaceAfter=12,
     )
     user_style = ParagraphStyle(
-        "UserMsg", parent=styles["Normal"], fontSize=10,
-        textColor=HexColor("#1e3a5f"), leftIndent=10, spaceAfter=4,
+        "UserMsg",
+        parent=styles["Normal"],
+        fontSize=10,
+        textColor=HexColor("#1e3a5f"),
+        leftIndent=10,
+        spaceAfter=4,
     )
     agent_style = ParagraphStyle(
-        "AgentMsg", parent=styles["Normal"], fontSize=10,
-        textColor=HexColor("#1a1d2e"), leftIndent=10, spaceAfter=4,
+        "AgentMsg",
+        parent=styles["Normal"],
+        fontSize=10,
+        textColor=HexColor("#1a1d2e"),
+        leftIndent=10,
+        spaceAfter=4,
     )
     role_style = ParagraphStyle(
-        "RoleLabel", parent=styles["Normal"], fontSize=10,
-        textColor=HexColor("#4f46e5"), spaceAfter=2,
+        "RoleLabel",
+        parent=styles["Normal"],
+        fontSize=10,
+        textColor=HexColor("#4f46e5"),
+        spaceAfter=2,
     )
 
     elements: list = [

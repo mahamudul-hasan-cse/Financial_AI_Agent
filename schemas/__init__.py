@@ -10,14 +10,13 @@ Modules:
   • ``schemas.common``     — Health, stats, session, error, tool responses
 """
 
-# ── nlp.py ───────────────────────────────────────────────────────────
-from schemas.nlp import (
-    Entity,
-    IntentMethod,
-    NLPMetadataSchema,
-    NLPStatusDetail,
-    SentimentLabel,
-    SentimentResult,
+from schemas.alerts import (
+    AlertCheckItem,
+    AlertCheckResponse,
+    AlertCreateRequest,
+    AlertListResponse,
+    AlertResponse,
+    AlertUpdateRequest,
 )
 
 # ── chat.py ──────────────────────────────────────────────────────────
@@ -27,17 +26,6 @@ from schemas.chat import (
     ChatResponse,
     ExportMessage,
     ExportRequest,
-)
-
-# ── streaming.py ─────────────────────────────────────────────────────
-from schemas.streaming import (
-    StreamEvent,
-    StreamEventChunk,
-    StreamEventDone,
-    StreamEventError,
-    StreamEventNLPMeta,
-    StreamEventResearch,
-    StreamEventType,
 )
 
 # ── common.py ────────────────────────────────────────────────────────
@@ -52,6 +40,15 @@ from schemas.common import (
     ToolResponse,
 )
 
+# ── nlp.py ───────────────────────────────────────────────────────────
+from schemas.nlp import (
+    Entity,
+    IntentMethod,
+    NLPMetadataSchema,
+    NLPStatusDetail,
+    SentimentLabel,
+    SentimentResult,
+)
 from schemas.research import (
     CompanySnapshotResponse,
     ComparisonResponse,
@@ -64,7 +61,6 @@ from schemas.research import (
     SnapshotHeadline,
     SnapshotPoint,
 )
-
 from schemas.sessions import (
     SessionDetail,
     SessionListResponse,
@@ -73,13 +69,15 @@ from schemas.sessions import (
     SessionSummary,
 )
 
-from schemas.alerts import (
-    AlertCheckItem,
-    AlertCheckResponse,
-    AlertCreateRequest,
-    AlertListResponse,
-    AlertResponse,
-    AlertUpdateRequest,
+# ── streaming.py ─────────────────────────────────────────────────────
+from schemas.streaming import (
+    StreamEvent,
+    StreamEventChunk,
+    StreamEventDone,
+    StreamEventError,
+    StreamEventNLPMeta,
+    StreamEventResearch,
+    StreamEventType,
 )
 
 # ── watchlist.py ──────────────────────────────────────────────────────

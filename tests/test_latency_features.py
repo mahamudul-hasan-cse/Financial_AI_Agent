@@ -185,8 +185,9 @@ class TestMarketDataTools:
                 {"period": "-1m", "strongBuy": 9, "buy": 19, "hold": 6, "sell": 2, "strongSell": 1},
             ]
         )
-        with patch("cache.cached_recommendations", return_value=table), patch(
-            "cache.cached_ticker_info", return_value=_INFO
+        with (
+            patch("cache.cached_recommendations", return_value=table),
+            patch("cache.cached_ticker_info", return_value=_INFO),
         ):
             data = json.loads(market_tools.get_analyst_recommendations("AAPL"))
         assert data["strongBuy"] == 10 and data["buy"] == 20
@@ -195,8 +196,14 @@ class TestMarketDataTools:
 
     def test_news_is_truncated_and_limited(self, market_tools):
         news = [
-            {"content": {"title": "T" * 500, "pubDate": "2026-10-01T12:00:00Z",
-                         "provider": {"displayName": "Wire"}, "body": "x" * 5000}}
+            {
+                "content": {
+                    "title": "T" * 500,
+                    "pubDate": "2026-10-01T12:00:00Z",
+                    "provider": {"displayName": "Wire"},
+                    "body": "x" * 5000,
+                }
+            }
             for _ in range(10)
         ]
         with patch("cache.cached_ticker_news", return_value=news):
@@ -331,7 +338,9 @@ def _groq_rate_limit(retry_after: str | None = "3"):
     response = httpx.Response(
         429, headers=headers, request=httpx.Request("POST", "https://api.groq.com/x")
     )
-    return groq.RateLimitError("Rate limit reached. Please try again in 7.5s.", response=response, body=None)
+    return groq.RateLimitError(
+        "Rate limit reached. Please try again in 7.5s.", response=response, body=None
+    )
 
 
 def _agno_rate_limit():

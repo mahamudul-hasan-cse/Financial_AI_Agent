@@ -66,7 +66,9 @@ def build_structured_response(
     """Build a consistent investor answer card from the raw agent output."""
 
     warnings = warnings or []
-    symbols = extract_symbols_from_entities(nlp_meta.entities if hasattr(nlp_meta, "entities") else [])
+    symbols = extract_symbols_from_entities(
+        nlp_meta.entities if hasattr(nlp_meta, "entities") else []
+    )
     symbol = symbols[0] if symbols else None
     market = None
     quote = None
@@ -83,11 +85,9 @@ def build_structured_response(
         {
             "label": "Entities",
             "value": ", ".join(
-                [
-                    (entity.ticker or entity.text)
-                    for entity in getattr(nlp_meta, "entities", [])
-                ]
-            ) or "None detected",
+                [(entity.ticker or entity.text) for entity in getattr(nlp_meta, "entities", [])]
+            )
+            or "None detected",
         },
         {"label": "Pipeline", "value": "NLP + market data + LLM answer synthesis"},
     ]
@@ -112,9 +112,27 @@ def build_structured_response(
                 "closes": market.get("closes") or [],
             }
         metrics = [
-            {"label": "Current Price", "value": f"${market['price']:.2f}" if market["price"] is not None else "n/a", "tone": "neutral"},
-            {"label": "Today", "value": f"{market['change_pct']:+.2f}%" if market["change_pct"] is not None else "n/a", "tone": "positive" if (market["change_pct"] or 0) >= 0 else "negative"},
-            {"label": "1M Trend", "value": f"{market['week_change_pct']:+.2f}%" if market["week_change_pct"] is not None else "n/a", "tone": "positive" if (market["week_change_pct"] or 0) >= 0 else "negative"},
+            {
+                "label": "Current Price",
+                "value": f"${market['price']:.2f}" if market["price"] is not None else "n/a",
+                "tone": "neutral",
+            },
+            {
+                "label": "Today",
+                "value": (
+                    f"{market['change_pct']:+.2f}%" if market["change_pct"] is not None else "n/a"
+                ),
+                "tone": "positive" if (market["change_pct"] or 0) >= 0 else "negative",
+            },
+            {
+                "label": "1M Trend",
+                "value": (
+                    f"{market['week_change_pct']:+.2f}%"
+                    if market["week_change_pct"] is not None
+                    else "n/a"
+                ),
+                "tone": "positive" if (market["week_change_pct"] or 0) >= 0 else "negative",
+            },
         ]
         metrics.extend(market["fundamentals"][:3])
         news_signals = [
@@ -138,10 +156,7 @@ def build_structured_response(
         )
 
     risk_sentences = _extract_risk_sentences(raw_content)
-    risks = [
-        {"title": "Risk", "detail": sentence, "tone": "risk"}
-        for sentence in risk_sentences
-    ]
+    risks = [{"title": "Risk", "detail": sentence, "tone": "risk"} for sentence in risk_sentences]
     if not risks:
         risks = [
             {
@@ -178,4 +193,3 @@ def build_structured_response(
         "artifacts": artifacts,
         "warnings": warnings,
     }
-

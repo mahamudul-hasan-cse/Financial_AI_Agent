@@ -7,10 +7,11 @@ spaCy and VADER are installed (graceful degradation paths).
 """
 
 import pytest
+
 from nlp_pipeline import (
+    analyze_sentiment,
     classify_intent,
     classify_intent_with_confidence,
-    analyze_sentiment,
     extract_entities,
     run_nlp_pipeline,
 )
@@ -69,6 +70,7 @@ class TestIntentWithConfidence:
 
     def test_ml_method_when_available(self):
         from nlp_pipeline import ML_CLASSIFIER_AVAILABLE
+
         _, _, method = classify_intent_with_confidence("What is AAPL price?")
         if ML_CLASSIFIER_AVAILABLE:
             assert method == "ml"
@@ -116,6 +118,7 @@ class TestSentimentAnalysis:
 
     def test_unavailable_label_when_vader_missing(self, monkeypatch):
         import nlp_pipeline
+
         monkeypatch.setattr(nlp_pipeline, "VADER_AVAILABLE", False)
         monkeypatch.setattr(nlp_pipeline, "_vader", None)
         result = analyze_sentiment("Hello world")

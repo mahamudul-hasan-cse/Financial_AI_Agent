@@ -30,7 +30,9 @@ _lemmatizer_nlp = load_spacy_model()
 _SPACY_LEMMA_AVAILABLE = _lemmatizer_nlp is not None
 # Lemmatisation only needs the tagger/lemmatizer; skip the expensive components.
 _LEMMA_DISABLE = [
-    name for name in ("ner", "parser") if _lemmatizer_nlp is not None and name in _lemmatizer_nlp.pipe_names
+    name
+    for name in ("ner", "parser")
+    if _lemmatizer_nlp is not None and name in _lemmatizer_nlp.pipe_names
 ]
 
 # Punctuation to remove (keep $ since it's meaningful in finance)
@@ -55,7 +57,7 @@ def preprocess_text(text: str) -> str:
     # Remove punctuation (keep $)
     text = text.translate(_PUNCT_TABLE)
     # Collapse whitespace
-    text = re.sub(r'\s+', ' ', text).strip()
+    text = re.sub(r"\s+", " ", text).strip()
 
     # Lemmatize with spaCy if available
     if _SPACY_LEMMA_AVAILABLE and _lemmatizer_nlp is not None:
@@ -64,6 +66,7 @@ def preprocess_text(text: str) -> str:
         text = " ".join(token.lemma_ for token in doc)
 
     return text.strip()
+
 
 # ── Training data ────────────────────────────────────────────────────────────
 # ~25 examples per intent, 8 intents = ~200 labeled training samples.
@@ -94,7 +97,6 @@ TRAINING_DATA: list[tuple[str, str]] = [
     ("Get me a quote for Oracle", "stock_price"),
     ("What is the stock price for Broadcom?", "stock_price"),
     ("Show the current market value of Adobe", "stock_price"),
-
     # chart
     ("Show me a chart of AAPL over the last year", "chart"),
     ("Plot Tesla stock price history", "chart"),
@@ -121,7 +123,6 @@ TRAINING_DATA: list[tuple[str, str]] = [
     ("Trend analysis chart for Uber", "chart"),
     ("Display price movements for QCOM", "chart"),
     ("Show a 1 year graph of Apple stock", "chart"),
-
     # comparison
     ("Compare AAPL vs MSFT performance", "comparison"),
     ("Which is better, Tesla or Rivian?", "comparison"),
@@ -148,7 +149,6 @@ TRAINING_DATA: list[tuple[str, str]] = [
     ("How does Spotify stack up against Apple Music stock?", "comparison"),
     ("Uber versus Lyft stock comparison", "comparison"),
     ("Compare growth rates of NVDA and AVGO", "comparison"),
-
     # news
     ("What's the latest news about Apple?", "news"),
     ("Any recent headlines about Tesla?", "news"),
@@ -175,7 +175,6 @@ TRAINING_DATA: list[tuple[str, str]] = [
     ("Any breaking news about Apple today?", "news"),
     ("Recent developments at Goldman Sachs", "news"),
     ("What are the top financial stories today?", "news"),
-
     # fundamentals
     ("What is the P/E ratio of Apple?", "fundamentals"),
     ("Show me Tesla's earnings per share", "fundamentals"),
@@ -202,7 +201,6 @@ TRAINING_DATA: list[tuple[str, str]] = [
     ("What's Salesforce revenue this year?", "fundamentals"),
     ("Net income for Broadcom", "fundamentals"),
     ("Earnings report analysis for Apple", "fundamentals"),
-
     # recommendation
     ("What do analysts recommend for AAPL?", "recommendation"),
     ("Should I buy Tesla stock?", "recommendation"),
@@ -229,7 +227,6 @@ TRAINING_DATA: list[tuple[str, str]] = [
     ("Should I hold or sell my Microsoft shares?", "recommendation"),
     ("Is Spotify a strong buy?", "recommendation"),
     ("Investment outlook for Oracle", "recommendation"),
-
     # excel
     ("Download an Excel report for AAPL", "excel"),
     ("Create a spreadsheet with Tesla data", "excel"),
@@ -256,7 +253,6 @@ TRAINING_DATA: list[tuple[str, str]] = [
     ("Give me a downloadable spreadsheet", "excel"),
     ("Export to Excel with charts data", "excel"),
     ("Create xlsx report for Uber", "excel"),
-
     # general
     ("Hello", "general"),
     ("Hi there", "general"),
@@ -290,6 +286,7 @@ try:
     from sklearn.feature_extraction.text import TfidfVectorizer
     from sklearn.linear_model import LogisticRegression
     from sklearn.pipeline import Pipeline
+
     SKLEARN_AVAILABLE = True
 except ImportError:
     SKLEARN_AVAILABLE = False
@@ -309,17 +306,25 @@ def _train_model() -> "Pipeline | None":
     texts = [preprocess_text(t) for t, _ in TRAINING_DATA]
     labels = [l for _, l in TRAINING_DATA]
 
-    pipeline = Pipeline([
-        ("tfidf", TfidfVectorizer(
-            ngram_range=(1, 2),
-            stop_words="english",
-        )),
-        ("clf", LogisticRegression(
-            max_iter=1000,
-            C=5.0,
-            solver="lbfgs",
-        )),
-    ])
+    pipeline = Pipeline(
+        [
+            (
+                "tfidf",
+                TfidfVectorizer(
+                    ngram_range=(1, 2),
+                    stop_words="english",
+                ),
+            ),
+            (
+                "clf",
+                LogisticRegression(
+                    max_iter=1000,
+                    C=5.0,
+                    solver="lbfgs",
+                ),
+            ),
+        ]
+    )
     pipeline.fit(texts, labels)
     _model = pipeline
     _is_trained = True
@@ -374,8 +379,8 @@ def cross_validate(k: int = 5) -> dict:
     if not SKLEARN_AVAILABLE:
         raise RuntimeError("sklearn is required for cross-validation")
 
-    from sklearn.model_selection import StratifiedKFold
     import numpy as np
+    from sklearn.model_selection import StratifiedKFold
 
     texts = [preprocess_text(t) for t, _ in TRAINING_DATA]
     labels = [l for _, l in TRAINING_DATA]
@@ -389,13 +394,20 @@ def cross_validate(k: int = 5) -> dict:
         val_texts = [texts[i] for i in val_idx]
         val_labels = [labels[i] for i in val_idx]
 
-        pipe = Pipeline([
-            ("tfidf", TfidfVectorizer(
-                ngram_range=(1, 2), max_features=5000,
-                stop_words="english", sublinear_tf=True,
-            )),
-            ("clf", LogisticRegression(max_iter=1000, C=5.0, solver="lbfgs")),
-        ])
+        pipe = Pipeline(
+            [
+                (
+                    "tfidf",
+                    TfidfVectorizer(
+                        ngram_range=(1, 2),
+                        max_features=5000,
+                        stop_words="english",
+                        sublinear_tf=True,
+                    ),
+                ),
+                ("clf", LogisticRegression(max_iter=1000, C=5.0, solver="lbfgs")),
+            ]
+        )
         pipe.fit(train_texts, train_labels)
         preds = pipe.predict(val_texts)
         acc = sum(1 for p, t in zip(preds, val_labels) if p == t) / len(val_labels)
@@ -424,8 +436,8 @@ def tune_hyperparameters() -> dict:
     if not SKLEARN_AVAILABLE:
         raise RuntimeError("sklearn is required for hyperparameter tuning")
 
-    from sklearn.model_selection import StratifiedKFold
     import numpy as np
+    from sklearn.model_selection import StratifiedKFold
 
     texts = [preprocess_text(t) for t, _ in TRAINING_DATA]
     labels = [l for _, l in TRAINING_DATA]
@@ -447,13 +459,20 @@ def tune_hyperparameters() -> dict:
                 val_texts = [texts[i] for i in val_idx]
                 val_labels = [labels[i] for i in val_idx]
 
-                pipe = Pipeline([
-                    ("tfidf", TfidfVectorizer(
-                        ngram_range=ngram, max_features=5000,
-                        stop_words="english", sublinear_tf=True,
-                    )),
-                    ("clf", LogisticRegression(max_iter=1000, C=C, solver="lbfgs")),
-                ])
+                pipe = Pipeline(
+                    [
+                        (
+                            "tfidf",
+                            TfidfVectorizer(
+                                ngram_range=ngram,
+                                max_features=5000,
+                                stop_words="english",
+                                sublinear_tf=True,
+                            ),
+                        ),
+                        ("clf", LogisticRegression(max_iter=1000, C=C, solver="lbfgs")),
+                    ]
+                )
                 pipe.fit(train_texts, train_labels)
                 preds = pipe.predict(val_texts)
                 acc = sum(1 for p, t in zip(preds, val_labels) if p == t) / len(val_labels)

@@ -31,6 +31,7 @@ SPACY_AVAILABLE = _nlp is not None
 # ── VADER Sentiment ──────────────────────────────────────────────────────────
 try:
     from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+
     _vader = SentimentIntensityAnalyzer()
     VADER_AVAILABLE = True
 except Exception:
@@ -40,6 +41,7 @@ except Exception:
 # ── ML Intent Classifier ────────────────────────────────────────────────────
 try:
     from intent_classifier import predict_intent as _ml_predict_intent
+
     ML_CLASSIFIER_AVAILABLE = True
 except Exception:
     ML_CLASSIFIER_AVAILABLE = False
@@ -47,6 +49,7 @@ except Exception:
 
 # ── Company name → ticker lookup (loaded from external JSON) ─────────────────
 _TICKER_MAP_PATH = pathlib.Path(__file__).parent / "data" / "company_tickers.json"
+
 
 def _load_ticker_map() -> dict[str, str | None]:
     """Load company name → ticker mapping from data/company_tickers.json."""
@@ -56,12 +59,15 @@ def _load_ticker_map() -> dict[str, str | None]:
     except Exception:
         return {}
 
+
 ORG_TO_TICKER: dict[str, str | None] = _load_ticker_map()
 
 # Longest names first so "bank of america" wins over any shorter overlap.
 _COMPANY_NAME_PATTERN: re.Pattern[str] | None = (
     re.compile(
-        r"\b(?:" + "|".join(re.escape(n) for n in sorted(ORG_TO_TICKER, key=len, reverse=True)) + r")\b",
+        r"\b(?:"
+        + "|".join(re.escape(n) for n in sorted(ORG_TO_TICKER, key=len, reverse=True))
+        + r")\b",
         re.IGNORECASE,
     )
     if ORG_TO_TICKER
@@ -71,103 +77,193 @@ _COMPANY_NAME_PATTERN: re.Pattern[str] | None = (
 # ── Intent keyword patterns ──────────────────────────────────────────────────
 _INTENT_PATTERNS: dict[str, list[str]] = {
     "stock_price": [
-        r"\bprice\b", r"\bcurrent\b", r"\btoday\b", r"\bhow much\b",
-        r"\bworth\b", r"\btrading at\b", r"\bquote\b", r"\bvalue\b",
+        r"\bprice\b",
+        r"\bcurrent\b",
+        r"\btoday\b",
+        r"\bhow much\b",
+        r"\bworth\b",
+        r"\btrading at\b",
+        r"\bquote\b",
+        r"\bvalue\b",
         r"\bclose[sd]?\b",
     ],
     "chart": [
-        r"\bchart\b", r"\bgraph\b", r"\bplot\b", r"\bvisuali[sz]e?\b",
-        r"\bhistory\b", r"\btrend\b", r"\bmovement\b", r"\bsho[uw] me\b",
+        r"\bchart\b",
+        r"\bgraph\b",
+        r"\bplot\b",
+        r"\bvisuali[sz]e?\b",
+        r"\bhistory\b",
+        r"\btrend\b",
+        r"\bmovement\b",
+        r"\bsho[uw] me\b",
     ],
     "comparison": [
-        r"\bcompare\b", r"\bvs\.?\b", r"\bversus\b", r"\bbetter\b",
-        r"\bdifference\b", r"\bwhich\b", r"\bboth\b", r"\bagainst\b",
+        r"\bcompare\b",
+        r"\bvs\.?\b",
+        r"\bversus\b",
+        r"\bbetter\b",
+        r"\bdifference\b",
+        r"\bwhich\b",
+        r"\bboth\b",
+        r"\bagainst\b",
     ],
     "news": [
-        r"\bnews\b", r"\blatest\b", r"\brecent\b", r"\bheadlines\b",
-        r"\bupdate\b", r"\bannounce\b", r"\brelease\b", r"\breport\b",
+        r"\bnews\b",
+        r"\blatest\b",
+        r"\brecent\b",
+        r"\bheadlines\b",
+        r"\bupdate\b",
+        r"\bannounce\b",
+        r"\brelease\b",
+        r"\breport\b",
     ],
     "fundamentals": [
-        r"\bpe ratio\b", r"\bp/e\b", r"\bearnings\b", r"\brevenue\b",
-        r"\beps\b", r"\bdividend\b", r"\bmarket cap\b", r"\bfundamental\b",
-        r"\bprofit\b", r"\bmargin\b", r"\bdebt\b", r"\bcash flow\b",
+        r"\bpe ratio\b",
+        r"\bp/e\b",
+        r"\bearnings\b",
+        r"\brevenue\b",
+        r"\beps\b",
+        r"\bdividend\b",
+        r"\bmarket cap\b",
+        r"\bfundamental\b",
+        r"\bprofit\b",
+        r"\bmargin\b",
+        r"\bdebt\b",
+        r"\bcash flow\b",
     ],
     "recommendation": [
-        r"\brecommend\b", r"\banalyst\b", r"\bbuy\b", r"\bsell\b",
-        r"\bhold\b", r"\brating\b", r"\boutlook\b", r"\btarget price\b",
-        r"\bupgrade\b", r"\bdowngrade\b",
+        r"\brecommend\b",
+        r"\banalyst\b",
+        r"\bbuy\b",
+        r"\bsell\b",
+        r"\bhold\b",
+        r"\brating\b",
+        r"\boutlook\b",
+        r"\btarget price\b",
+        r"\bupgrade\b",
+        r"\bdowngrade\b",
     ],
     "excel": [
-        r"\bexcel\b", r"\bspreadsheet\b", r"\bdownload\b",
-        r"\bexport\b", r"\bxlsx\b",
+        r"\bexcel\b",
+        r"\bspreadsheet\b",
+        r"\bdownload\b",
+        r"\bexport\b",
+        r"\bxlsx\b",
     ],
 }
 
 # All-caps words that are NOT stock tickers
 _TICKER_STOPWORDS: set[str] = {
-    "I", "A", "AI", "OK", "US", "IT", "IS", "BE", "DO", "GO",
-    "THE", "AND", "FOR", "OR", "IN", "TO", "OF", "AT", "ME",
-    "MY", "WE", "HE", "SHE", "AS", "BY", "AN", "ON", "UP",
-    "NO", "SO", "IF", "BUT", "NOT", "CAN", "AM", "ARE",
-    "PE", "CEO", "CFO", "IPO", "ETF", "GDP", "FED", "SEC",
-    "NAV", "ROI", "ROE", "EPS", "YOY", "QOQ", "TTM",
+    "I",
+    "A",
+    "AI",
+    "OK",
+    "US",
+    "IT",
+    "IS",
+    "BE",
+    "DO",
+    "GO",
+    "THE",
+    "AND",
+    "FOR",
+    "OR",
+    "IN",
+    "TO",
+    "OF",
+    "AT",
+    "ME",
+    "MY",
+    "WE",
+    "HE",
+    "SHE",
+    "AS",
+    "BY",
+    "AN",
+    "ON",
+    "UP",
+    "NO",
+    "SO",
+    "IF",
+    "BUT",
+    "NOT",
+    "CAN",
+    "AM",
+    "ARE",
+    "PE",
+    "CEO",
+    "CFO",
+    "IPO",
+    "ETF",
+    "GDP",
+    "FED",
+    "SEC",
+    "NAV",
+    "ROI",
+    "ROE",
+    "EPS",
+    "YOY",
+    "QOQ",
+    "TTM",
 }
 
 # ── Financial entity regex patterns ──────────────────────────────────────────
 # FIN_METRIC: common financial metrics and indicators
 _FIN_METRIC_PATTERN = re.compile(
-    r'\b('
-    r'P/E\s*ratio|PE\s*ratio|P/E|'
-    r'EPS|'
-    r'RSI|'
-    r'EBITDA|'
-    r'ROI|ROE|ROA|'
-    r'ROIC|'
-    r'EV/EBITDA|'
-    r'P/B\s*ratio|PB\s*ratio|'
-    r'P/S\s*ratio|PS\s*ratio|'
-    r'NAV|'
-    r'DCF|'
-    r'WACC|'
-    r'beta|'
-    r'market\s*cap(?:italization)?|'
-    r'free\s*cash\s*flow|'
-    r'dividend\s*yield|'
-    r'debt[- ]to[- ]equity'
-    r')\b',
-    re.IGNORECASE
+    r"\b("
+    r"P/E\s*ratio|PE\s*ratio|P/E|"
+    r"EPS|"
+    r"RSI|"
+    r"EBITDA|"
+    r"ROI|ROE|ROA|"
+    r"ROIC|"
+    r"EV/EBITDA|"
+    r"P/B\s*ratio|PB\s*ratio|"
+    r"P/S\s*ratio|PS\s*ratio|"
+    r"NAV|"
+    r"DCF|"
+    r"WACC|"
+    r"beta|"
+    r"market\s*cap(?:italization)?|"
+    r"free\s*cash\s*flow|"
+    r"dividend\s*yield|"
+    r"debt[- ]to[- ]equity"
+    r")\b",
+    re.IGNORECASE,
 )
 
 # DATE_REF: fiscal quarters and years
 _DATE_REF_PATTERN = re.compile(
-    r'\b('
-    r'Q[1-4]\s*\d{4}|'           # Q1 2024
-    r'FY\s*\d{4}|'               # FY2023
-    r'H[12]\s*\d{4}|'            # H1 2024
-    r'\d{4}\s*Q[1-4]|'           # 2024 Q1
-    r'(?:first|second|third|fourth)\s+quarter\s+\d{4}'  # first quarter 2024
-    r')\b',
-    re.IGNORECASE
+    r"\b("
+    r"Q[1-4]\s*\d{4}|"  # Q1 2024
+    r"FY\s*\d{4}|"  # FY2023
+    r"H[12]\s*\d{4}|"  # H1 2024
+    r"\d{4}\s*Q[1-4]|"  # 2024 Q1
+    r"(?:first|second|third|fourth)\s+quarter\s+\d{4}"  # first quarter 2024
+    r")\b",
+    re.IGNORECASE,
 )
 
 # MONEY: currency amounts
 _MONEY_PATTERN = re.compile(
-    r'\$\d+(?:,\d{3})*(?:\.\d+)?(?:\s*[BMKTbmkt](?:illion|illion)?)?'  # $150, $1.2B, $500M, $3.50
+    r"\$\d+(?:,\d{3})*(?:\.\d+)?(?:\s*[BMKTbmkt](?:illion|illion)?)?"  # $150, $1.2B, $500M, $3.50
 )
 
 
 class NLPMetadata(TypedDict):
     """Structured output from the NLP preprocessing pipeline."""
-    entities: list[dict]       # [{text, label, ticker|None}]
-    intent: str                # one of the INTENT_PATTERNS keys or "general"
-    intent_confidence: float   # ML classifier confidence (0.0–1.0), 0 for keyword
-    intent_method: str         # "ml" or "keyword"
-    sentiment: dict            # {label, score, compound}
+
+    entities: list[dict]  # [{text, label, ticker|None}]
+    intent: str  # one of the INTENT_PATTERNS keys or "general"
+    intent_confidence: float  # ML classifier confidence (0.0–1.0), 0 for keyword
+    intent_method: str  # "ml" or "keyword"
+    sentiment: dict  # {label, score, compound}
     spacy_available: bool
     vader_available: bool
 
 
 # ── Public API ───────────────────────────────────────────────────────────────
+
 
 def extract_entities(text: str) -> list[dict]:
     """Extract named entities from text and map companies to ticker symbols.
@@ -206,7 +302,11 @@ def extract_entities(text: str) -> list[dict]:
             # ticker symbol, fill in the ticker field so the entity carries the
             # correct symbol. The ticker regex still runs independently so a
             # proper TICKER-labelled entity is also emitted.
-            if ticker is None and re.match(r'^[A-Z]{1,5}$', ent.text) and ent.text not in _TICKER_STOPWORDS:
+            if (
+                ticker is None
+                and re.match(r"^[A-Z]{1,5}$", ent.text)
+                and ent.text not in _TICKER_STOPWORDS
+            ):
                 ticker = ent.text
             entities.append({"text": ent.text, "label": ent.label_, "ticker": ticker})
 
@@ -248,7 +348,7 @@ def extract_entities(text: str) -> list[dict]:
 
     # Regex pass — detect bare ticker symbols (ALL_CAPS, 1–5 chars)
     # Uses its own seen set so spaCy-detected words are still checked.
-    for match in re.finditer(r'\b([A-Z]{1,5})\b', text):
+    for match in re.finditer(r"\b([A-Z]{1,5})\b", text):
         t = match.group(1)
         if t in _TICKER_STOPWORDS or t in seen_fin_metric or t.lower() in seen_ticker:
             continue

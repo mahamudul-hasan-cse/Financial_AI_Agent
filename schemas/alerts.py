@@ -61,4 +61,3 @@ class AlertCheckResponse(BaseModel):
 
     session_id: str
     items: list[AlertCheckItem] = Field(default_factory=list)
-

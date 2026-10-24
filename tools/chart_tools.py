@@ -20,28 +20,29 @@ from agno.tools import Toolkit
 
 try:
     import matplotlib
+
     matplotlib.use("Agg")  # Non-interactive backend for server use
-    import matplotlib.pyplot as plt
     import matplotlib.dates as mdates
+    import matplotlib.pyplot as plt
 except ImportError:
     raise ImportError("matplotlib is required. Install with: pip install matplotlib")
 
 try:
-    import yfinance as yf
+    import yfinance as yf  # noqa: F401
 except ImportError:
     raise ImportError("yfinance is required. Install with: pip install yfinance")
 
 import cache
 
-
 # ── Structured response types ────────────────────────────────────────
+
 
 class Artifact(TypedDict):
     """Descriptor for a file produced by a tool."""
 
-    type: str       # e.g. "chart"
-    path: str       # e.g. "outputs/charts/aapl_chart_20260307.png"
-    filename: str   # e.g. "aapl_chart_20260307.png"
+    type: str  # e.g. "chart"
+    path: str  # e.g. "outputs/charts/aapl_chart_20260307.png"
+    filename: str  # e.g. "aapl_chart_20260307.png"
 
 
 class ToolResult(TypedDict):
@@ -68,6 +69,7 @@ class ToolResult(TypedDict):
 
 
 # ── Toolkit ──────────────────────────────────────────────────────────
+
 
 class ChartTools(Toolkit):
     """Toolkit for generating financial charts.
@@ -309,7 +311,9 @@ class ChartTools(Toolkit):
         try:
             symbol_list = [s.strip().upper() for s in symbols.split(",") if s.strip()]
             if len(symbol_list) < 2:
-                return self._fail(tool, "Need at least 2 symbols to compare. Provide comma-separated tickers.")
+                return self._fail(
+                    tool, "Need at least 2 symbols to compare. Provide comma-separated tickers."
+                )
 
             fig, ax = plt.subplots(figsize=(12, 6))
             colors = ["#4f46e5", "#e11d48", "#16a34a", "#f59e0b", "#8b5cf6"]
@@ -354,7 +358,11 @@ class ChartTools(Toolkit):
             return self._ok(
                 tool,
                 f"Overlay comparison chart saved as {filename}",
-                data={"symbols": list(perf_data.keys()), "period": period, "performance": perf_data},
+                data={
+                    "symbols": list(perf_data.keys()),
+                    "period": period,
+                    "performance": perf_data,
+                },
                 artifacts=[self._artifact(filename)],
                 sources=["Yahoo Finance"],
             )

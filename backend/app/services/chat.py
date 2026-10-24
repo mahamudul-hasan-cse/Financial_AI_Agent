@@ -46,12 +46,23 @@ _SENTIMENT_TTL_SECONDS = 600
 # ("Quick Take: ...").  Only line-leading labels are stripped so that
 # legitimate text and table headers containing these words survive.
 _LABELS = (
-    "Quick Take", "Key Data", "What It Means", "Risk", "Next Steps", "Summary",
-    "Overview", "Analysis", "Verdict", "Bottom Line", "Insight", "Context",
+    "Quick Take",
+    "Key Data",
+    "What It Means",
+    "Risk",
+    "Next Steps",
+    "Summary",
+    "Overview",
+    "Analysis",
+    "Verdict",
+    "Bottom Line",
+    "Insight",
+    "Context",
     "Recommendation",
 )
 _LABEL_RE = re.compile(
-    r"^(?P<prefix>[ \t]*(?:(?:#+|>|[-*])[ \t]+)?)(?:\*\*)?(?:" + "|".join(map(re.escape, _LABELS))
+    r"^(?P<prefix>[ \t]*(?:(?:#+|>|[-*])[ \t]+)?)(?:\*\*)?(?:"
+    + "|".join(map(re.escape, _LABELS))
     + r"):(?:\*\*)?[ \t]*",
     re.MULTILINE,
 )

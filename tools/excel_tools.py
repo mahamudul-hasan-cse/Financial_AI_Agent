@@ -7,7 +7,6 @@ stock data automatically via yfinance.
 
 from datetime import datetime
 from pathlib import Path
-from typing import Any
 
 from agno.tools import Toolkit
 
@@ -18,12 +17,12 @@ except ImportError:
 
 try:
     import openpyxl
-    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 except ImportError:
     raise ImportError("openpyxl is required. Install with: pip install openpyxl")
 
 try:
-    import yfinance as yf
+    import yfinance as yf  # noqa: F401
 except ImportError:
     raise ImportError("yfinance is required. Install with: pip install yfinance")
 
@@ -121,17 +120,20 @@ class ExcelTools(Toolkit):
             for sym in symbol_list:
                 try:
                     info = cache.cached_ticker_info(sym)
-                    rows.append({
-                        "Symbol": sym,
-                        "Name": info.get("shortName", "N/A"),
-                        "Price ($)": info.get("currentPrice") or info.get("regularMarketPrice", "N/A"),
-                        "Change (%)": info.get("regularMarketChangePercent", "N/A"),
-                        "Market Cap": info.get("marketCap", "N/A"),
-                        "P/E Ratio": info.get("trailingPE", "N/A"),
-                        "EPS": info.get("trailingEps", "N/A"),
-                        "52W High": info.get("fiftyTwoWeekHigh", "N/A"),
-                        "52W Low": info.get("fiftyTwoWeekLow", "N/A"),
-                    })
+                    rows.append(
+                        {
+                            "Symbol": sym,
+                            "Name": info.get("shortName", "N/A"),
+                            "Price ($)": info.get("currentPrice")
+                            or info.get("regularMarketPrice", "N/A"),
+                            "Change (%)": info.get("regularMarketChangePercent", "N/A"),
+                            "Market Cap": info.get("marketCap", "N/A"),
+                            "P/E Ratio": info.get("trailingPE", "N/A"),
+                            "EPS": info.get("trailingEps", "N/A"),
+                            "52W High": info.get("fiftyTwoWeekHigh", "N/A"),
+                            "52W Low": info.get("fiftyTwoWeekLow", "N/A"),
+                        }
+                    )
                 except Exception:
                     rows.append({"Symbol": sym, "Name": "Error fetching data"})
 

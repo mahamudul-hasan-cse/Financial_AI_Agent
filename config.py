@@ -151,8 +151,10 @@ def load_settings() -> Settings:
 
     outputs_dir = Path(_env("OUTPUTS_DIR", str(APP_DIR / "outputs")))
     # DATABASE_PATH is the documented name; SQLITE_PATH is kept for compatibility.
-    db_path = os.getenv("DATABASE_PATH") or os.getenv("SQLITE_PATH") or str(
-        APP_DIR / "data" / "financial_agent.db"
+    db_path = (
+        os.getenv("DATABASE_PATH")
+        or os.getenv("SQLITE_PATH")
+        or str(APP_DIR / "data" / "financial_agent.db")
     )
     cors_origins_raw = _env("CORS_ORIGINS", "http://localhost:5173")
     cors_origins = [origin.strip() for origin in cors_origins_raw.split(",") if origin.strip()]

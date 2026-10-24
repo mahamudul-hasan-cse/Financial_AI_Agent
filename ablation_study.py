@@ -24,13 +24,13 @@ Run directly: python ablation_study.py
 from __future__ import annotations
 
 import random
-import sys
 from typing import Callable
 
 
 def _intent_accuracy(classify_fn: Callable[[str], str]) -> float:
     """Compute intent accuracy using a given classify function."""
     from evaluation import INTENT_TEST_SET
+
     correct = sum(1 for text, label in INTENT_TEST_SET if classify_fn(text) == label)
     return round(correct / len(INTENT_TEST_SET), 4) if INTENT_TEST_SET else 0.0
 
@@ -38,6 +38,7 @@ def _intent_accuracy(classify_fn: Callable[[str], str]) -> float:
 def _entity_recall(extract_fn: Callable[[str], list[dict]]) -> float:
     """Compute entity recall using a given extraction function."""
     from evaluation import NER_TEST_SET
+
     total_expected = 0
     total_found = 0
     for text, expected in NER_TEST_SET:
@@ -52,6 +53,7 @@ def _entity_recall(extract_fn: Callable[[str], list[dict]]) -> float:
 def _sentiment_coverage(analyze_fn: Callable[[str], dict]) -> float:
     """Compute fraction of queries that get a real sentiment label."""
     from evaluation import INTENT_TEST_SET
+
     texts = [t for t, _ in INTENT_TEST_SET]
     available = sum(1 for t in texts if analyze_fn(t)["label"] != "unavailable")
     return round(available / len(texts), 4) if texts else 0.0
@@ -111,7 +113,7 @@ def _bootstrap_metric(
     scores.sort()
     mean = sum(scores) / len(scores)
     variance = sum((s - mean) ** 2 for s in scores) / len(scores)
-    std = variance ** 0.5
+    std = variance**0.5
 
     lo_idx = int(0.025 * n_bootstrap)
     hi_idx = int(0.975 * n_bootstrap) - 1
@@ -126,19 +128,19 @@ def _bootstrap_metric(
 
 def run_ablation_study() -> list[dict]:
     """Run all ablation conditions and return results."""
-    import nlp_pipeline
     from nlp_pipeline import (
-        extract_entities,
-        classify_intent as keyword_classify,
         analyze_sentiment,
     )
+    from nlp_pipeline import classify_intent as keyword_classify
+    from nlp_pipeline import extract_entities
 
     results: list[dict] = []
 
     # 1. Full pipeline (ML intent + enhanced NER + sentiment + RAG)
     try:
         from intent_classifier import predict_intent
-        full_classify = lambda t: predict_intent(t)[0]
+
+        full_classify = lambda t: predict_intent(t)[0]  # noqa: E731
         ml_available = True
     except Exception:
         full_classify = keyword_classify
@@ -146,72 +148,88 @@ def run_ablation_study() -> list[dict]:
 
     full_acc = _intent_accuracy(full_classify)
     full_bootstrap = _bootstrap_metric(lambda: full_acc, full_classify)
-    results.append({
-        "condition": "Full pipeline",
-        "intent_accuracy": full_acc,
-        "intent_accuracy_ci": full_bootstrap,
-        "entity_recall": _entity_recall(extract_entities),
-        "sentiment_coverage": _sentiment_coverage(analyze_sentiment),
-        "rag_quality": _rag_quality(),
-    })
+    results.append(
+        {
+            "condition": "Full pipeline",
+            "intent_accuracy": full_acc,
+            "intent_accuracy_ci": full_bootstrap,
+            "entity_recall": _entity_recall(extract_entities),
+            "sentiment_coverage": _sentiment_coverage(analyze_sentiment),
+            "rag_quality": _rag_quality(),
+        }
+    )
 
     # 2. No NER — replace extract_entities with a no-op
-    no_ner_fn = lambda text: []
-    results.append({
-        "condition": "No NER",
-        "intent_accuracy": _intent_accuracy(full_classify),
-        "intent_accuracy_ci": full_bootstrap,
-        "entity_recall": _entity_recall(no_ner_fn),
-        "sentiment_coverage": _sentiment_coverage(analyze_sentiment),
-        "rag_quality": _rag_quality(),
-    })
+    no_ner_fn = lambda text: []  # noqa: E731
+    results.append(
+        {
+            "condition": "No NER",
+            "intent_accuracy": _intent_accuracy(full_classify),
+            "intent_accuracy_ci": full_bootstrap,
+            "entity_recall": _entity_recall(no_ner_fn),
+            "sentiment_coverage": _sentiment_coverage(analyze_sentiment),
+            "rag_quality": _rag_quality(),
+        }
+    )
 
     # 3. No intent — always return "general"
-    no_intent_fn = lambda text: "general"
+    no_intent_fn = lambda text: "general"  # noqa: E731
     no_intent_acc = _intent_accuracy(no_intent_fn)
     no_intent_bootstrap = _bootstrap_metric(lambda: no_intent_acc, no_intent_fn)
-    results.append({
-        "condition": "No intent classifier",
-        "intent_accuracy": no_intent_acc,
-        "intent_accuracy_ci": no_intent_bootstrap,
-        "entity_recall": _entity_recall(extract_entities),
-        "sentiment_coverage": _sentiment_coverage(analyze_sentiment),
-        "rag_quality": _rag_quality(),
-    })
+    results.append(
+        {
+            "condition": "No intent classifier",
+            "intent_accuracy": no_intent_acc,
+            "intent_accuracy_ci": no_intent_bootstrap,
+            "entity_recall": _entity_recall(extract_entities),
+            "sentiment_coverage": _sentiment_coverage(analyze_sentiment),
+            "rag_quality": _rag_quality(),
+        }
+    )
 
     # 4. No sentiment — return unavailable
-    no_sentiment_fn = lambda text: {"label": "unavailable", "score": 0.0, "compound": 0.0}
-    results.append({
-        "condition": "No sentiment",
-        "intent_accuracy": _intent_accuracy(full_classify),
-        "intent_accuracy_ci": full_bootstrap,
-        "entity_recall": _entity_recall(extract_entities),
-        "sentiment_coverage": _sentiment_coverage(no_sentiment_fn),
-        "rag_quality": _rag_quality(),
-    })
+    no_sentiment_fn = lambda text: {  # noqa: E731
+        "label": "unavailable",
+        "score": 0.0,
+        "compound": 0.0,
+    }
+    results.append(
+        {
+            "condition": "No sentiment",
+            "intent_accuracy": _intent_accuracy(full_classify),
+            "intent_accuracy_ci": full_bootstrap,
+            "entity_recall": _entity_recall(extract_entities),
+            "sentiment_coverage": _sentiment_coverage(no_sentiment_fn),
+            "rag_quality": _rag_quality(),
+        }
+    )
 
     # 5. No RAG — score is 0
-    results.append({
-        "condition": "No RAG",
-        "intent_accuracy": _intent_accuracy(full_classify),
-        "intent_accuracy_ci": full_bootstrap,
-        "entity_recall": _entity_recall(extract_entities),
-        "sentiment_coverage": _sentiment_coverage(analyze_sentiment),
-        "rag_quality": 0.0,
-    })
+    results.append(
+        {
+            "condition": "No RAG",
+            "intent_accuracy": _intent_accuracy(full_classify),
+            "intent_accuracy_ci": full_bootstrap,
+            "entity_recall": _entity_recall(extract_entities),
+            "sentiment_coverage": _sentiment_coverage(analyze_sentiment),
+            "rag_quality": 0.0,
+        }
+    )
 
     # 6. Keyword-only intent (no ML)
     if ml_available:
         kw_acc = _intent_accuracy(keyword_classify)
         kw_bootstrap = _bootstrap_metric(lambda: kw_acc, keyword_classify)
-        results.append({
-            "condition": "Keyword-only intent",
-            "intent_accuracy": kw_acc,
-            "intent_accuracy_ci": kw_bootstrap,
-            "entity_recall": _entity_recall(extract_entities),
-            "sentiment_coverage": _sentiment_coverage(analyze_sentiment),
-            "rag_quality": _rag_quality(),
-        })
+        results.append(
+            {
+                "condition": "Keyword-only intent",
+                "intent_accuracy": kw_acc,
+                "intent_accuracy_ci": kw_bootstrap,
+                "entity_recall": _entity_recall(extract_entities),
+                "sentiment_coverage": _sentiment_coverage(analyze_sentiment),
+                "rag_quality": _rag_quality(),
+            }
+        )
 
     return results
 
@@ -219,8 +237,8 @@ def run_ablation_study() -> list[dict]:
 def print_ablation_table(results: list[dict]) -> None:
     """Print a formatted comparison table."""
     print(f"\n{'=' * 80}")
-    print(f"  Ablation Study — NLP Pipeline Component Impact Analysis")
-    print(f"  Financial AI Agent — CSE495B")
+    print("  Ablation Study — NLP Pipeline Component Impact Analysis")
+    print("  Financial AI Agent — CSE495B")
     print(f"{'=' * 80}")
 
     headers = ["Condition", "Intent Acc", "95% CI", "Entity Rec", "Sent Cov", "RAG Qual"]
@@ -275,11 +293,17 @@ def print_ablation_table(results: list[dict]) -> None:
         for r in results[1:]:
             degradations = []
             if r["intent_accuracy"] < full["intent_accuracy"]:
-                degradations.append(f"intent acc {(r['intent_accuracy'] - full['intent_accuracy']):+.1%}")
+                degradations.append(
+                    f"intent acc {(r['intent_accuracy'] - full['intent_accuracy']):+.1%}"
+                )
             if r["entity_recall"] < full["entity_recall"]:
-                degradations.append(f"entity recall {(r['entity_recall'] - full['entity_recall']):+.1%}")
+                degradations.append(
+                    f"entity recall {(r['entity_recall'] - full['entity_recall']):+.1%}"
+                )
             if r["sentiment_coverage"] < full["sentiment_coverage"]:
-                degradations.append(f"sentiment cov {(r['sentiment_coverage'] - full['sentiment_coverage']):+.1%}")
+                degradations.append(
+                    f"sentiment cov {(r['sentiment_coverage'] - full['sentiment_coverage']):+.1%}"
+                )
             if r["rag_quality"] < full["rag_quality"]:
                 degradations.append(f"RAG qual {(r['rag_quality'] - full['rag_quality']):+.3f}")
             if degradations:

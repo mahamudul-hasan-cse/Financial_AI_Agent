@@ -73,7 +73,9 @@ class TestSessionOwnership:
 
     def test_cannot_rename_or_delete_foreign_session(self, client, other_client):
         sid = client.post("/api/chat", json={"message": "secret"}).json()["session_id"]
-        assert other_client.patch(f"/api/sessions/{sid}", json={"title": "pwned"}).status_code == 404
+        assert (
+            other_client.patch(f"/api/sessions/{sid}", json={"title": "pwned"}).status_code == 404
+        )
         assert other_client.delete(f"/api/chat/{sid}").status_code == 404
         assert client.get(f"/api/sessions/{sid}").json()["title"] != "pwned"
 
@@ -102,7 +104,10 @@ class TestSessionOwnership:
 
         assert other_client.get(f"/api/alerts/{sid}").status_code == 404
         assert other_client.get(f"/api/watchlist/{sid}").status_code == 404
-        assert other_client.patch(f"/api/alerts/item/{alert_id}", json={"enabled": False}).status_code == 404
+        assert (
+            other_client.patch(f"/api/alerts/item/{alert_id}", json={"enabled": False}).status_code
+            == 404
+        )
         assert other_client.delete(f"/api/alerts/item/{alert_id}").status_code == 404
 
         res = client.patch(f"/api/alerts/item/{alert_id}", json={"enabled": False})
@@ -135,7 +140,10 @@ class TestSessionIdValidation:
         before = set(settings.outputs_dir.rglob("*.pdf"))
         res = client.post(
             "/api/chat/export",
-            json={"session_id": "sess_abc-123", "messages": [{"role": "user", "content": "<b>hi</b>"}]},
+            json={
+                "session_id": "sess_abc-123",
+                "messages": [{"role": "user", "content": "<b>hi</b>"}],
+            },
         )
         assert res.status_code == 200
         assert res.headers["content-type"] == "application/pdf"
@@ -177,7 +185,9 @@ class TestRoutingAndCors:
         from backend.app.agent.financial_agent import FinancialAgentService
 
         monkeypatch.setenv("GROQ_API_KEY", "")
-        with patch("backend.app.services.chat.get_agent_service", return_value=FinancialAgentService()):
+        with patch(
+            "backend.app.services.chat.get_agent_service", return_value=FinancialAgentService()
+        ):
             c = TestClient(app, headers={"X-Client-Id": TEST_CLIENT_ID})
             assert c.post("/api/chat", json={"message": "hi"}).status_code == 503
             assert c.post("/api/chat/stream", json={"message": "hi"}).status_code == 503
@@ -207,7 +217,7 @@ class TestStreamingContract:
     def test_final_matches_persisted_text(self, client, mock_agent):
         mock_agent.stream.return_value = iter(["Quick Take: price is up"])
         events = _sse_events(client.post("/api/chat/stream", json={"message": "hi"}).text)
-        final = json.loads(next(e for e in events if e.startswith("[FINAL]"))[len("[FINAL]"):])
+        final = json.loads(next(e for e in events if e.startswith("[FINAL]"))[len("[FINAL]") :])
         from api import sessions
 
         stored = next(iter(sessions.values()))["messages"][-1]["content"]
@@ -220,7 +230,7 @@ class TestStreamingContract:
         )
         events = _sse_events(client.post("/api/chat/stream", json={"message": "hi"}).text)
         status = [e for e in events if e.startswith("[STATUS]")]
-        assert [json.loads(e[len("[STATUS]"):]) for e in status] == [
+        assert [json.loads(e[len("[STATUS]") :]) for e in status] == [
             {"type": "status", "message": "Rate limit reached — retrying in 2s…"}
         ]
         chunks = [json.loads(e) for e in events if e.startswith('"')]
@@ -281,6 +291,8 @@ class TestPersistence:
         import persistence
 
         persistence.upsert_session("sess_a", client_id=TEST_CLIENT_ID)
-        alert = persistence.create_alert("sess_a", "MSFT", "daily_digest", threshold=None, label="x")
+        alert = persistence.create_alert(
+            "sess_a", "MSFT", "daily_digest", threshold=None, label="x"
+        )
         updated = persistence.update_alert(alert["id"], label="renamed")
         assert updated["label"] == "renamed"
