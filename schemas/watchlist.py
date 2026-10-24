@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
+from schemas.common import SESSION_ID_PATTERN
+
 
 class WatchlistAddRequest(BaseModel):
     """Request body for ``POST /api/watchlist``."""
@@ -18,7 +20,9 @@ class WatchlistAddRequest(BaseModel):
         max_length=10,
         description="Stock ticker symbol to add (e.g. AAPL, GOOGL).",
     )
-    session_id: str = Field(..., description="Session ID that owns the watchlist.")
+    session_id: str = Field(
+        ..., pattern=SESSION_ID_PATTERN, description="Session ID that owns the watchlist."
+    )
 
 
 class WatchlistRemoveRequest(BaseModel):
@@ -30,7 +34,9 @@ class WatchlistRemoveRequest(BaseModel):
         max_length=10,
         description="Stock ticker symbol to remove.",
     )
-    session_id: str = Field(..., description="Session ID that owns the watchlist.")
+    session_id: str = Field(
+        ..., pattern=SESSION_ID_PATTERN, description="Session ID that owns the watchlist."
+    )
 
 
 class WatchlistItem(BaseModel):

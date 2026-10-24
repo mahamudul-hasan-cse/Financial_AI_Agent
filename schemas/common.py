@@ -13,12 +13,21 @@ from pydantic import BaseModel, Field
 
 from schemas.nlp import NLPStatusDetail
 
+# Session ids: letters, digits, "_" and "-" (UUIDs and "sess_<uuid>" match).
+# No dots or slashes, so a session id can never form a path that escapes a
+# directory.  Shared by every request schema and path parameter.
+SESSION_ID_PATTERN = r"^[A-Za-z0-9_-]{1,64}$"
+SESSION_ID_MAX_LENGTH = 64
+
 
 # ── Health ───────────────────────────────────────────────────────────
 class HealthResponse(BaseModel):
     """Response body for ``GET /api/health``."""
 
-    status: str = "ok"
+    status: str = Field(default="ok", description='"ok", or "degraded" when no LLM is usable.')
+    llm_provider: str = "groq"
+    llm_configured: bool = False
+    detail: str | None = Field(default=None, description="Why the service is degraded.")
     groq_configured: bool = False
     active_sessions: int = 0
     total_messages: int = 0

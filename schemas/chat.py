@@ -10,6 +10,7 @@ import re
 
 from pydantic import BaseModel, Field, field_validator
 
+from schemas.common import SESSION_ID_PATTERN
 from schemas.nlp import NLPMetadataSchema
 from schemas.research import ResearchResponse
 
@@ -31,7 +32,8 @@ class ChatRequest(BaseModel):
     )
     session_id: str | None = Field(
         default=None,
-        description="Optional session ID for conversation continuity.",
+        pattern=SESSION_ID_PATTERN,
+        description="Optional session ID for conversation continuity ([A-Za-z0-9_-]{1,64}).",
     )
 
     @field_validator("message")
@@ -65,8 +67,8 @@ class ChatResponse(BaseModel):
 class ExportMessage(BaseModel):
     """A single message in an export request."""
 
-    role: str = Field(..., description="Message role: 'user' or 'agent'.")
-    content: str = Field(..., description="Message text content.")
+    role: str = Field(..., max_length=20, description="Message role: 'user' or 'agent'.")
+    content: str = Field(..., max_length=50_000, description="Message text content.")
 
 
 class ExportRequest(BaseModel):
@@ -74,9 +76,11 @@ class ExportRequest(BaseModel):
 
     session_id: str = Field(
         default="unknown",
-        description="Session ID (used for filename generation).",
+        pattern=SESSION_ID_PATTERN,
+        description="Session ID ([A-Za-z0-9_-]{1,64}); must belong to the caller.",
     )
     messages: list[ExportMessage] | None = Field(
         default=None,
+        max_length=500,
         description="Messages to export. Falls back to server-side session if omitted.",
     )

@@ -4,25 +4,27 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
+from schemas.common import SESSION_ID_PATTERN
+
 
 class AlertCreateRequest(BaseModel):
     """Request body for creating a simple watch alert."""
 
-    session_id: str
+    session_id: str = Field(..., pattern=SESSION_ID_PATTERN)
     symbol: str = Field(..., min_length=1, max_length=10)
     alert_type: str = Field(
         ...,
         description="One of price_above, price_below, daily_digest, breaking_news.",
     )
     threshold: float | None = None
-    label: str | None = None
+    label: str | None = Field(default=None, max_length=120)
 
 
 class AlertUpdateRequest(BaseModel):
     """Request body for toggling or renaming an alert."""
 
     enabled: bool | None = None
-    label: str | None = None
+    label: str | None = Field(default=None, max_length=120)
 
 
 class AlertResponse(BaseModel):
