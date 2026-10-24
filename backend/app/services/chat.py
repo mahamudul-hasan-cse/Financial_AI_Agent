@@ -11,6 +11,7 @@ import cache
 from backend.app.agent.financial_agent import (
     ERROR_PREFIX,
     GENERIC_ERROR_MESSAGE,
+    MODEL_INFO_PREFIX,
     STATUS_PREFIX,
     AgentNotConfiguredError,
     LLMRateLimitError,
@@ -28,6 +29,7 @@ __all__ = [
     "ERROR_PREFIX",
     "GENERIC_ERROR_MESSAGE",
     "LLMRateLimitError",
+    "MODEL_INFO_PREFIX",
     "STATUS_PREFIX",
     "agent",
     "append_disclaimer",

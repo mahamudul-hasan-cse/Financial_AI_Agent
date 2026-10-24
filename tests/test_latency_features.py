@@ -394,7 +394,8 @@ class TestServiceRateLimitRetries:
         agent = MagicMock()
         agent.run.side_effect = [_agno_rate_limit(), [_chunk("Hello")]]
         chunks = list(FinancialAgentService(agent=agent, max_retries=2).stream("q"))
-        assert chunks == ["[STATUS] Rate limit reached — retrying in 3s…", "Hello"]
+        assert chunks[:-1] == ["[STATUS] Rate limit reached — retrying in 3s…", "Hello"]
+        assert chunks[-1].startswith("[MODEL_INFO]")
         _no_retry_sleep.assert_called_once_with(3)
 
     def test_stream_gives_clear_error_after_max_retries(self, _no_retry_sleep):

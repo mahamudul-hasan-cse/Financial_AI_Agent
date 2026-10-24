@@ -144,7 +144,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
 
 # Single worker on purpose: sessions cache, rate limits, the TTL data cache
 # and stats live in process memory (SQLite holds the durable data).
-# Secrets (GROQ_API_KEY, API_KEY) come from the runtime env (--env-file /
+# Secrets (GROQ_API_KEY, OPENROUTER_API_KEY, API_KEY) come from the runtime env (--env-file /
 # platform secrets) — never bake them into the image.
 # Behind a PaaS load balancer set FORWARDED_ALLOW_IPS='*' so rate limits use
 # the real client IP from X-Forwarded-For.

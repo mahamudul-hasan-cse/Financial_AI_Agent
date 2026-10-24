@@ -32,6 +32,10 @@ DEFAULT_OLLAMA_HOST = "http://localhost:11434"
 DEFAULT_SPACY_MODEL = "en_core_web_sm"
 DEFAULT_EMBEDDING_MODEL = "all-MiniLM-L6-v2"
 SUPPORTED_LLM_PROVIDERS = ("groq", "ollama")
+SUPPORTED_FALLBACK_PROVIDERS = ("openrouter", "none")
+# OpenRouter backup models (both support tool calling on the free tier).
+DEFAULT_OPENROUTER_MODEL = "google/gemma-4-26b-a4b-it:free"
+DEFAULT_OPENROUTER_FALLBACK_MODELS = "nvidia/nemotron-3.5-super-vl:free"
 
 
 def _env(name: str, default: str) -> str:
@@ -64,6 +68,36 @@ def get_groq_model() -> str:
 def get_groq_api_key() -> str | None:
     """Return the Groq API key, or ``None`` when unset/empty."""
     return os.getenv("GROQ_API_KEY") or None
+
+
+def get_openrouter_api_key() -> str | None:
+    """Return the OpenRouter API key, or ``None`` when unset/empty."""
+    return os.getenv("OPENROUTER_API_KEY") or None
+
+
+def get_fallback_provider() -> str:
+    """Return the backup LLM provider used when Groq is busy or down.
+
+    ``FALLBACK_PROVIDER`` defaults to ``openrouter`` when ``OPENROUTER_API_KEY``
+    is set and ``none`` otherwise; ``none`` (or any unknown value) disables it.
+    """
+    default = "openrouter" if get_openrouter_api_key() else "none"
+    provider = _env("FALLBACK_PROVIDER", default).lower()
+    return provider if provider in SUPPORTED_FALLBACK_PROVIDERS else "none"
+
+
+def get_openrouter_models() -> list[str]:
+    """OpenRouter model ids to try, in order: ``OPENROUTER_MODEL`` first, then
+    ``OPENROUTER_FALLBACK_MODELS`` (comma-separated; empty string = none)."""
+    models = [_env("OPENROUTER_MODEL", DEFAULT_OPENROUTER_MODEL)]
+    extra = os.getenv("OPENROUTER_FALLBACK_MODELS")
+    if extra is None:
+        extra = DEFAULT_OPENROUTER_FALLBACK_MODELS
+    for model in extra.split(","):
+        model = model.strip()
+        if model and model not in models:
+            models.append(model)
+    return models
 
 
 @dataclass(frozen=True)

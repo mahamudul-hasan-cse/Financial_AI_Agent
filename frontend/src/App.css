@@ -654,6 +654,11 @@ a { color: var(--accent); }
   cursor: not-allowed;
 }
 
+.message-model {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
 .message-status {
   margin: 12px 16px 0;
   padding: 8px 12px;

@@ -43,6 +43,11 @@ describe('interpretEvent', () => {
     expect(interpretEvent('[STATUS]{oops')).toEqual({ type: 'ignored' })
   })
 
+  it('parses model info events', () => {
+    expect(interpretEvent('[MODEL_INFO]{"provider":"openrouter","model":"m:free","fallback":true}'))
+      .toEqual({ type: 'model', value: { provider: 'openrouter', model: 'm:free', fallback: true } })
+  })
+
   it('never appends unparseable fragments as text', () => {
     expect(interpretEvent('"partial')).toEqual({ type: 'ignored' })
     expect(interpretEvent('[NLP_META]{broken')).toEqual({ type: 'ignored' })

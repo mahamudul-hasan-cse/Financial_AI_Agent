@@ -61,6 +61,15 @@ class ChatResponse(BaseModel):
         default=None,
         description="Structured investor answer card rendered by the frontend.",
     )
+    llm_provider: str | None = Field(
+        default=None,
+        description='LLM provider that answered: "groq", "openrouter" (backup) or "ollama".',
+    )
+    llm_model: str | None = Field(default=None, description="Model id that answered.")
+    llm_fallback: bool = Field(
+        default=False,
+        description="True when Groq was busy/down and a backup model answered.",
+    )
 
 
 # ── Export ──────────────────────────────────────────────────────────

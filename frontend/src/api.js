@@ -82,6 +82,8 @@ export function interpretEvent(data) {
     ['[NLP_META]', 'nlp'],
     ['[RESEARCH_DATA]', 'research'],
     ['[FINAL]', 'final'],
+    // {"provider":"openrouter","model":"…","fallback":true}
+    ['[MODEL_INFO]', 'model'],
   ]) {
     if (data.startsWith(prefix)) {
       try { return { type, value: JSON.parse(data.slice(prefix.length)) } }

@@ -4,10 +4,16 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from backend.app.agent.financial_agent import llm_status
+from backend.app.agent.financial_agent import fallback_status, get_agent_service, llm_status
 from backend.app.state import _stats, sessions
 from config import get_groq_api_key
-from schemas import HealthResponse, NLPStatusDetail, StatsResponse
+from schemas import (
+    FallbackStatus,
+    HealthResponse,
+    LastLLMUsage,
+    NLPStatusDetail,
+    StatsResponse,
+)
 
 router = APIRouter(prefix="/api", tags=["health"])
 
@@ -18,12 +24,15 @@ def health() -> HealthResponse:
     from nlp_pipeline import SPACY_AVAILABLE, VADER_AVAILABLE
 
     llm = llm_status()
+    last_used = get_agent_service().last_used
     return HealthResponse(
         status="ok" if llm["configured"] else "degraded",
         llm_provider=llm["provider"],
         llm_configured=llm["configured"],
         detail=llm["detail"],
         groq_configured=bool(get_groq_api_key()),
+        fallback=FallbackStatus(**fallback_status()),
+        last_llm=LastLLMUsage(**last_used) if last_used else None,
         active_sessions=len(sessions),
         total_messages=_stats["total_messages"],
         nlp_status=NLPStatusDetail(spacy_ner=SPACY_AVAILABLE, vader_sentiment=VADER_AVAILABLE),

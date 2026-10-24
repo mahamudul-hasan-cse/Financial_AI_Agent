@@ -4,8 +4,9 @@ Environment is configured *before* any application module is imported:
 
 * ``DATABASE_PATH`` points at a throw-away SQLite file, so tests never touch
   ``data/financial_agent.db``.
-* ``GROQ_API_KEY`` is removed, proving the app imports and starts without
-  it (tests that build a real agno Agent set a fake key themselves).
+* ``GROQ_API_KEY`` (and the OpenRouter fallback settings) are removed,
+  proving the app imports and starts without them (tests that build a real
+  agno Agent set a fake key themselves).
 * A developer's ``.env`` is ignored (``config`` would otherwise load it and
   re-add GROQ_API_KEY or change limits/retries), so results don't depend on it.
 """
@@ -25,6 +26,10 @@ os.environ["DATABASE_PATH"] = os.path.join(_TEST_DB_DIR, "test.db")
 os.environ.pop("SQLITE_PATH", None)
 os.environ.pop("GROQ_API_KEY", None)
 os.environ.pop("GROQ_MODEL", None)
+for _name in (
+    "OPENROUTER_API_KEY", "FALLBACK_PROVIDER", "OPENROUTER_MODEL", "OPENROUTER_FALLBACK_MODELS"
+):
+    os.environ.pop(_name, None)
 os.environ["LLM_PROVIDER"] = "groq"
 
 import pytest  # noqa: E402

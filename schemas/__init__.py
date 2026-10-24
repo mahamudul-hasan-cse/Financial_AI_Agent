@@ -43,7 +43,9 @@ from schemas.streaming import (
 # ── common.py ────────────────────────────────────────────────────────
 from schemas.common import (
     ErrorResponse,
+    FallbackStatus,
     HealthResponse,
+    LastLLMUsage,
     SessionClearResponse,
     StatsResponse,
     ToolResponse,
@@ -112,6 +114,8 @@ __all__ = [
     # common
     "ErrorResponse",
     "HealthResponse",
+    "FallbackStatus",
+    "LastLLMUsage",
     "SessionClearResponse",
     "StatsResponse",
     "ToolResponse",

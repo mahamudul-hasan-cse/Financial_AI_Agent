@@ -4,8 +4,9 @@ SSE protocol (``POST /api/chat/stream``), one ``data:`` line per event:
 
 * ``[NLP_META]{json}``      – NLP analysis of the question (always first)
 * ``[STATUS]{json}``        – transient progress, e.g. a rate-limit retry:
-  ``{"type": "status", "message": "Rate limit reached — retrying in 4s…"}``.
-  Sent only before any answer text; may repeat (``LLM_MAX_RETRIES``).
+  ``{"type": "status", "message": "Rate limit reached — retrying in 4s…"}``
+  or a switch to the backup provider (``"Groq busy — switched to backup
+  model"``).  Sent only before any answer text; may repeat.
 * ``"<json string>"``       – a chunk of answer text (JSON-encoded so
   newlines survive SSE framing)
 * ``[ERROR] <message>``     – generation failed; the message is user-facing
@@ -13,6 +14,8 @@ SSE protocol (``POST /api/chat/stream``), one ``data:`` line per event:
 * ``[FINAL]"<json string>"`` – the cleaned, persisted answer; clients should
   replace the streamed text with it
 * ``[RESEARCH_DATA]{json}`` – structured research card
+* ``[MODEL_INFO]{json}``    – who answered:
+  ``{"provider": "openrouter", "model": "…", "fallback": true}``
 * ``[DONE]``                – end of stream (always last)
 """
 
@@ -94,6 +97,10 @@ def chat(req: ChatRequest, request: Request, client_id: ClientId) -> ChatRespons
         ) from exc
     elapsed_ms = round((time.time() - t0) * 1000, 1)
     record_response_time(elapsed_ms)
+    # run() returns an AgentReply (a str) that says which provider answered.
+    llm_provider = getattr(content, "provider", None)
+    llm_model = getattr(content, "model", None)
+    llm_fallback = bool(getattr(content, "fallback", False))
 
     content = chat_service.append_disclaimer(chat_service.clean_response(str(content)))
     structured = build_structured_response(req.message, content, nlp_meta)
@@ -107,6 +114,9 @@ def chat(req: ChatRequest, request: Request, client_id: ClientId) -> ChatRespons
         session_title=stored["title"] if stored else None,
         nlp_metadata=nlp_meta,
         structured_response=structured,
+        llm_provider=llm_provider,
+        llm_model=llm_model,
+        llm_fallback=llm_fallback,
     )
 
 
@@ -132,6 +142,7 @@ def chat_stream(req: ChatRequest, request: Request, client_id: ClientId) -> Stre
 
         collected: list[str] = []
         error_event: str | None = None
+        model_info: dict | None = None
         t0 = time.time()
         try:
             # Retries (and their [STATUS] notices) happen inside service.stream().
@@ -142,6 +153,12 @@ def chat_stream(req: ChatRequest, request: Request, client_id: ClientId) -> Stre
                         chat_service.STATUS_PREFIX
                         + json.dumps({"type": "status", "message": message})
                     )
+                    continue
+                if text.startswith(chat_service.MODEL_INFO_PREFIX):
+                    try:
+                        model_info = json.loads(text[len(chat_service.MODEL_INFO_PREFIX):])
+                    except ValueError:
+                        logger.warning("Ignoring malformed model info: %.200s", text)
                     continue
                 if text.startswith(chat_service.ERROR_PREFIX):
                     error_event = text
@@ -164,6 +181,8 @@ def chat_stream(req: ChatRequest, request: Request, client_id: ClientId) -> Stre
             )
             yield _sse(f"[FINAL]{json.dumps(final)}")
             yield _sse(f"[RESEARCH_DATA]{json.dumps(structured)}")
+            if model_info:
+                yield _sse(f"[MODEL_INFO]{json.dumps(model_info)}")
 
         yield _sse("[DONE]")
 

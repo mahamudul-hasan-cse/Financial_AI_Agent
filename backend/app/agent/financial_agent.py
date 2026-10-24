@@ -9,6 +9,14 @@ Groq SDK so streaming clients can be told about them: :meth:`stream` yields
 ``"[STATUS] Retrying in Ns…"`` sentinels while it waits, honouring Groq's
 ``Retry-After`` on 429s, and a final ``"[ERROR] …"`` when it gives up.
 
+Before any of that waiting, a Groq failure that looks like overload (429,
+5xx, connection error) is retried *immediately* on the OpenRouter backup
+models (``FALLBACK_PROVIDER``/``OPENROUTER_*``), once per request.  Streams
+announce it with ``"[STATUS] Groq busy — switched to backup model"``.  Which
+provider/model answered is returned on :class:`AgentReply` (``run``), as a
+final ``"[MODEL_INFO] {json}"`` chunk (``stream``) and in
+:attr:`FinancialAgentService.last_used`.
+
 Public API
 ----------
 - ``FinancialAgentService`` – the main service class.
@@ -21,13 +29,15 @@ Public API
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import math
 import os
 import re
 import threading
 import time
-from typing import Any, Generator, Sequence
+from datetime import datetime, timezone
+from typing import Any, Generator, Iterator, Sequence
 
 os.environ.setdefault("AGNO_TELEMETRY", "false")
 
@@ -40,9 +50,12 @@ from backend.app.agent.prompts import AGENT_INSTRUCTIONS  # noqa: E402
 from backend.app.agent.tool_registry import build_tools, compact_tool_output  # noqa: E402
 from config import (  # noqa: E402
     DEFAULT_GROQ_MODEL,
+    get_fallback_provider,
     get_groq_api_key,
     get_groq_model,
     get_llm_provider,
+    get_openrouter_api_key,
+    get_openrouter_models,
     settings,
 )
 
@@ -50,13 +63,16 @@ logger = logging.getLogger("financial_agent")
 
 __all__ = [  # noqa: F822
     "FinancialAgentService",
+    "AgentReply",
     "AgentNotConfiguredError",
     "LLMRateLimitError",
     "STATUS_PREFIX",
     "ERROR_PREFIX",
+    "MODEL_INFO_PREFIX",
     "agent_service",
     "agent",  # resolved lazily via __getattr__
     "create_agent",
+    "fallback_status",
     "get_agent_service",
     "llm_status",
     "main",
@@ -78,6 +94,9 @@ _DEFAULT_MAX_RETRIES: int = settings.llm_max_retries
 # Sentinel prefixes yielded by FinancialAgentService.stream().
 STATUS_PREFIX = "[STATUS]"
 ERROR_PREFIX = "[ERROR]"
+MODEL_INFO_PREFIX = "[MODEL_INFO]"
+FALLBACK_STATUS_MESSAGE = "Groq busy — switched to backup model"
+NEXT_FALLBACK_STATUS_MESSAGE = "Backup model busy — trying another…"
 GENERIC_ERROR_MESSAGE = "Unable to generate a response right now. Please try again in a moment."
 RATE_LIMIT_ERROR_MESSAGE = (
     "The AI service is busy (rate limit reached). Please wait a minute and try again."
@@ -96,6 +115,28 @@ class AgentNotConfiguredError(RuntimeError):
 
 class LLMRateLimitError(RuntimeError):
     """Raised by :meth:`FinancialAgentService.run` when retries end on a rate limit."""
+
+
+class AgentReply(str):
+    """Answer text from :meth:`FinancialAgentService.run`, plus who produced it."""
+
+    provider: str | None
+    model: str | None
+    fallback: bool
+
+    def __new__(
+        cls,
+        text: str,
+        *,
+        provider: str | None = None,
+        model: str | None = None,
+        fallback: bool = False,
+    ) -> "AgentReply":
+        reply = super().__new__(cls, text)
+        reply.provider = provider
+        reply.model = model
+        reply.fallback = fallback
+        return reply
 
 
 # ── Retry helpers ────────────────────────────────────────────────────
@@ -127,6 +168,32 @@ def is_rate_limit_error(exc: BaseException) -> bool:
             return True
         text = str(err).lower()
         if "rate limit" in text or "rate_limit" in text or "too many requests" in text:
+            return True
+    return False
+
+
+def is_fallback_error(exc: BaseException) -> bool:
+    """True when the provider is busy or down: 429, 5xx, timeout or connection error.
+
+    These are worth retrying on a *different* provider right away; 4xx
+    errors such as a bad request would fail there too.
+    """
+    if is_rate_limit_error(exc):
+        return True
+    for err in _exception_chain(exc):
+        if isinstance(err, (httpx.TransportError, ConnectionError, TimeoutError)):
+            return True
+        if type(err).__name__ in (
+            "APIConnectionError", "APITimeoutError", "InternalServerError", "ServiceUnavailableError"
+        ):
+            return True
+        status = getattr(err, "status_code", None)
+        if status is None:
+            status = getattr(getattr(err, "response", None), "status_code", None)
+        if isinstance(status, int) and status >= 500:
+            return True
+        text = str(err).lower()
+        if "unavailable" in text or "over capacity" in text or "overloaded" in text:
             return True
     return False
 
@@ -243,6 +310,34 @@ def _build_groq_model(model_id: str, api_key: str | None) -> Groq:
         max_retries=0,
         http_client=_groq_http_client(),
     )
+
+
+def _build_openrouter_model(model_id: str) -> Any:
+    """Create an agno OpenRouter model (backup for Groq) sharing the HTTP client."""
+    api_key = get_openrouter_api_key()
+    if not api_key:
+        raise AgentNotConfiguredError("OPENROUTER_API_KEY is not set.")
+    from agno.models.openrouter import OpenRouter  # needs the `openai` package
+
+    return OpenRouter(
+        id=model_id,
+        api_key=api_key,
+        max_retries=0,
+        # agno's OpenRouter default (1024) cuts longer analyses short.
+        max_tokens=4096,
+        http_client=_groq_http_client(),
+    )
+
+
+def _model_info(model: Any) -> dict[str, Any]:
+    """``{"provider", "model", "fallback": False}`` for the primary agno model."""
+    model_id = getattr(model, "id", None)
+    return {
+        # Class name: "groq", "ollama" or "openrouter" (isinstance covers mocks).
+        "provider": "groq" if isinstance(model, Groq) else type(model).__name__.lower(),
+        "model": model_id if isinstance(model_id, str) else None,
+        "fallback": False,
+    }
 
 
 def _build_ollama_model(model_id: str, host: str | None = None) -> "Any":
@@ -382,6 +477,7 @@ class FinancialAgentService:
         agent: Agent | None = None,
         *,
         max_retries: int | None = None,
+        fallback_factory: Any | None = None,
     ) -> None:
         self._injected: bool = agent is not None
         self._agent: Agent | None = agent
@@ -389,7 +485,10 @@ class FinancialAgentService:
         self._max_retries: int = max(
             0, _DEFAULT_MAX_RETRIES if max_retries is None else max_retries
         )
+        # (model_id, session_id) -> Agent for a backup model; tests inject one.
+        self._fallback_factory = fallback_factory
         self.init_error: str | None = None
+        self.last_used: dict[str, Any] | None = None
 
     # -- Expose underlying agent for consumers that need it ------------
 
@@ -436,13 +535,72 @@ class FinancialAgentService:
             kwargs["session_id"] = session_id
         return kwargs
 
+    # -- Fallback (OpenRouter) -----------------------------------------
+
+    @staticmethod
+    def _fallback_models(agent: Agent) -> list[str]:
+        """Backup model ids for this request; empty unless Groq is primary."""
+        if not isinstance(agent.model, Groq):
+            return []
+        if get_fallback_provider() != "openrouter" or not get_openrouter_api_key():
+            return []
+        return get_openrouter_models()
+
+    def _fallback_agent(self, model_id: str, session_id: str | None) -> Agent:
+        """An agent on OpenRouter *model_id* with the primary's tools and instructions."""
+        if self._fallback_factory is not None:
+            return self._fallback_factory(model_id, session_id)
+        template = self.agent
+        return create_agent(
+            model=_build_openrouter_model(model_id),
+            tools=template.tools,
+            instructions=template.instructions,
+            session_id=session_id,
+        )
+
+    def _record(self, info: dict[str, Any]) -> None:
+        self.last_used = {**info, "at": datetime.now(timezone.utc).isoformat()}
+
     # -- Synchronous execution -----------------------------------------
 
-    def run(self, prompt: str, session_id: str | None = None) -> str:
+    def _run_once(self, agent: Agent, prompt: str, session_id: str | None, attempt: int) -> str:
+        t0 = time.monotonic()
+        result = agent.run(prompt, **self._run_kwargs(False, session_id))
+        raw: str = result.content if hasattr(result, "content") else str(result)
+        logger.info(
+            "[LLM latency] provider=%s attempt=%d elapsed=%.1fms",
+            type(agent.model).__name__,
+            attempt,
+            (time.monotonic() - t0) * 1000,
+        )
+        return _strip_tool_metadata(raw)
+
+    def _run_fallback(
+        self, models: list[str], prompt: str, session_id: str | None
+    ) -> AgentReply | None:
+        """Try each backup model in order; ``None`` if all of them fail."""
+        for model_id in models:
+            try:
+                fb_agent = self._fallback_agent(model_id, session_id)
+                content = self._run_once(fb_agent, prompt, session_id, 1)
+            except Exception as exc:
+                logger.warning("[LLM] Backup model %s failed: %s", model_id, str(exc)[:200])
+                continue
+            info = {"provider": "openrouter", "model": model_id, "fallback": True}
+            self._record(info)
+            logger.info("[LLM] Answered by backup %s model=%s", info["provider"], info["model"])
+            return AgentReply(content, **info)
+        return None
+
+    def run(self, prompt: str, session_id: str | None = None) -> AgentReply:
         """Execute the agent and return the full response text.
 
-        Retries up to ``max_retries`` times (rate limits wait for Groq's
-        ``Retry-After``; other errors wait 1s).
+        On a Groq 429/5xx/connection error the request first goes to the
+        OpenRouter backup models (once, without waiting); if they fail too,
+        Groq is retried up to ``max_retries`` times (rate limits wait for
+        Groq's ``Retry-After``; other errors wait 1s).
+
+        Returns an :class:`AgentReply` (a ``str``) carrying the provider/model.
 
         Raises
         ------
@@ -454,25 +612,16 @@ class FinancialAgentService:
             If all retry attempts are exhausted for another reason.
         """
         agent = self._agent_for(session_id)
+        fallback_models = self._fallback_models(agent)
         attempts = self._max_retries + 1
         last_error: Exception | None = None
         for attempt in range(1, attempts + 1):
             try:
-                t0 = time.monotonic()
-                result = agent.run(prompt, **self._run_kwargs(False, session_id))
-                elapsed_ms = round((time.monotonic() - t0) * 1000, 1)
-                raw: str = (
-                    result.content if hasattr(result, "content") else str(result)
-                )
-                content = _strip_tool_metadata(raw)
+                content = self._run_once(agent, prompt, session_id, attempt)
                 logger.info("Agent run succeeded on attempt %d", attempt)
-                logger.info(
-                    "[LLM latency] provider=%s attempt=%d elapsed=%.1fms",
-                    type(agent.model).__name__,
-                    attempt,
-                    elapsed_ms,
-                )
-                return content
+                info = _model_info(agent.model)
+                self._record(info)
+                return AgentReply(content, **info)
             except AgentNotConfiguredError:
                 raise
             except Exception as exc:
@@ -484,6 +633,13 @@ class FinancialAgentService:
                     str(exc)[:200],
                     exc_info=logger.isEnabledFor(logging.DEBUG),
                 )
+                if fallback_models and is_fallback_error(exc):
+                    # Backups are tried once per request, before any back-off.
+                    models, fallback_models = fallback_models, []
+                    logger.warning("[LLM] Groq unavailable — switching to backup models")
+                    reply = self._run_fallback(models, prompt, session_id)
+                    if reply is not None:
+                        return reply
                 if attempt < attempts:
                     _sleep(retry_delay(exc, attempt))
         if last_error is not None and is_rate_limit_error(last_error):
@@ -492,16 +648,58 @@ class FinancialAgentService:
 
     # -- Streaming execution -------------------------------------------
 
+    def _stream_once(
+        self, agent: Agent, prompt: str, session_id: str | None, attempt: int
+    ) -> Iterator[str]:
+        """Yield cleaned text deltas from one streamed run; raises on failure."""
+        t0 = time.monotonic()
+        raw_buffer = ""
+        emitted_clean = ""
+        for chunk in agent.run(prompt, **self._run_kwargs(True, session_id)):
+            if getattr(chunk, "event", None) == "RunError":
+                raise RuntimeError(getattr(chunk, "content", None) or "agent run error")
+            text: str = ""
+            if hasattr(chunk, "content") and chunk.content:
+                text = chunk.content
+            elif isinstance(chunk, str):
+                text = chunk
+            if not text:
+                continue
+            if not raw_buffer:
+                logger.info(
+                    "[LLM latency] provider=%s attempt=%d TTFT=%.1fms (stream)",
+                    type(agent.model).__name__,
+                    attempt,
+                    (time.monotonic() - t0) * 1000,
+                )
+            raw_buffer += text
+            cleaned = _strip_tool_metadata_streaming(raw_buffer)
+            if cleaned.startswith(emitted_clean):
+                delta = cleaned[len(emitted_clean):]
+            else:
+                delta = cleaned
+            if delta:
+                emitted_clean = cleaned
+                yield delta
+
+    def _model_info_chunk(self, info: dict[str, Any]) -> str:
+        self._record(info)
+        return f"{MODEL_INFO_PREFIX} {json.dumps(info)}"
+
     def stream(self, prompt: str, session_id: str | None = None) -> Generator[str, None, None]:
         """Execute the agent in streaming mode, yielding text chunks.
 
-        Besides answer text, two kinds of sentinel chunks may be yielded:
+        Besides answer text, three kinds of sentinel chunks may be yielded:
 
         * ``"[STATUS] <message>"`` – a failure happened *before* any text was
-          produced and the call will be retried after the stated wait
-          (at most ``max_retries`` times).
+          produced: either the request moved to a backup model
+          (``FALLBACK_STATUS_MESSAGE``) or it will be retried after the
+          stated wait (at most ``max_retries`` times).
         * ``"[ERROR] <message>"`` – generation failed for good; the message is
           safe to show to users.  Always the last chunk.
+        * ``"[MODEL_INFO] {json}"`` – after a successful answer: which
+          ``provider``/``model`` produced it and whether it was a ``fallback``.
+          Always the last chunk.
 
         Failures after partial output are not retried (that would duplicate
         text); they end with ``[ERROR]``.
@@ -512,43 +710,48 @@ class FinancialAgentService:
             Before the first chunk, if no LLM provider is configured.
         """
         agent = self._agent_for(session_id)
+        fallback_models = self._fallback_models(agent)
         attempts = self._max_retries + 1
         emitted_any = False
         for attempt in range(1, attempts + 1):
-            t0 = time.monotonic()
-            raw_buffer = ""
-            emitted_clean = ""
             try:
-                for chunk in agent.run(prompt, **self._run_kwargs(True, session_id)):
-                    if getattr(chunk, "event", None) == "RunError":
-                        raise RuntimeError(getattr(chunk, "content", None) or "agent run error")
-                    text: str = ""
-                    if hasattr(chunk, "content") and chunk.content:
-                        text = chunk.content
-                    elif isinstance(chunk, str):
-                        text = chunk
-                    if not text:
-                        continue
-                    if not raw_buffer:
-                        logger.info(
-                            "[LLM latency] provider=%s attempt=%d TTFT=%.1fms (stream)",
-                            type(agent.model).__name__,
-                            attempt,
-                            (time.monotonic() - t0) * 1000,
-                        )
-                    raw_buffer += text
-                    cleaned = _strip_tool_metadata_streaming(raw_buffer)
-                    if cleaned.startswith(emitted_clean):
-                        delta = cleaned[len(emitted_clean):]
-                    else:
-                        delta = cleaned
-                    if delta:
-                        emitted_clean = cleaned
-                        emitted_any = True
-                        yield delta
+                for delta in self._stream_once(agent, prompt, session_id, attempt):
+                    emitted_any = True
+                    yield delta
+                yield self._model_info_chunk(_model_info(agent.model))
                 return
             except Exception as exc:
                 rate_limited = is_rate_limit_error(exc)
+                if not emitted_any and fallback_models and is_fallback_error(exc):
+                    # Backups are tried once per request, before any back-off.
+                    models, fallback_models = fallback_models, []
+                    logger.warning(
+                        "Stream attempt %d failed (%s); switching to backup models",
+                        attempt,
+                        str(exc)[:200],
+                    )
+                    yield f"{STATUS_PREFIX} {FALLBACK_STATUS_MESSAGE}"
+                    for index, model_id in enumerate(models):
+                        try:
+                            fb_agent = self._fallback_agent(model_id, session_id)
+                            for delta in self._stream_once(fb_agent, prompt, session_id, 1):
+                                emitted_any = True
+                                yield delta
+                        except Exception as fb_exc:
+                            logger.warning(
+                                "[LLM] Backup model %s failed: %s", model_id, str(fb_exc)[:200]
+                            )
+                            if emitted_any:
+                                yield f"{ERROR_PREFIX} {GENERIC_ERROR_MESSAGE}"
+                                return
+                            if index + 1 < len(models):
+                                yield f"{STATUS_PREFIX} {NEXT_FALLBACK_STATUS_MESSAGE}"
+                            continue
+                        yield self._model_info_chunk(
+                            {"provider": "openrouter", "model": model_id, "fallback": True}
+                        )
+                        return
+                    # Every backup failed: carry on with the Groq retry path.
                 if emitted_any or attempt >= attempts:
                     logger.exception("Stream error (attempt %d/%d)", attempt, attempts)
                     message = RATE_LIMIT_ERROR_MESSAGE if rate_limited else GENERIC_ERROR_MESSAGE
@@ -564,6 +767,20 @@ class FinancialAgentService:
                 )
                 yield f"{STATUS_PREFIX} {retry_status_message(exc, delay)}"
                 _sleep(delay)
+
+
+def fallback_status() -> dict[str, Any]:
+    """Describe the backup-provider configuration (no network calls)."""
+    provider = get_fallback_provider()
+    if provider == "none":
+        return {"provider": "none", "configured": False, "models": [], "detail": None}
+    configured = bool(get_openrouter_api_key())
+    return {
+        "provider": provider,
+        "configured": configured,
+        "models": get_openrouter_models(),
+        "detail": None if configured else "OPENROUTER_API_KEY is not set.",
+    }
 
 
 def llm_status() -> dict[str, Any]:

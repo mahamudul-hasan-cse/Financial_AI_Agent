@@ -206,7 +206,7 @@ export default function App() {
     // One request per question: no automatic fallback to /api/chat, which
     // would run the LLM a second time (the server already retries failed
     // generations, announcing each retry with a status event).
-    const state = { text: '', final: null, error: null, status: null, nlpMeta: null, structured: null }
+    const state = { text: '', final: null, error: null, status: null, nlpMeta: null, structured: null, modelInfo: null }
     const render = (fallbackText = '') => {
       // The user switched/cleared the conversation: don't write into it.
       if (controller.signal.reason === 'switch') return
@@ -221,6 +221,7 @@ export default function App() {
           timestamp: agentTs,
           nlpMeta: state.nlpMeta,
           structuredResponse: state.structured,
+          modelInfo: state.modelInfo,
         }
         return updated
       })
@@ -254,6 +255,7 @@ export default function App() {
           if (event.type === 'nlp') state.nlpMeta = event.value
           else if (event.type === 'research') state.structured = event.value
           else if (event.type === 'final') state.final = event.value
+          else if (event.type === 'model') state.modelInfo = event.value
           else if (event.type === 'error') state.error = event.value || 'Generation failed.'
           else if (event.type === 'status') {
             state.status = event.value
@@ -437,6 +439,12 @@ export default function App() {
 
                           <div className="message-footer">
                             <span className="message-time">{formatTime(message.timestamp)}</span>
+                            {message.modelInfo?.fallback && (
+                              <span
+                                className="message-model"
+                                title={`Groq was busy, so ${message.modelInfo.provider} answered`}
+                              >via backup · {message.modelInfo.model || message.modelInfo.provider}</span>
+                            )}
                             {message.content && !isStreaming && (
                               <div className="message-actions">
                                 <button

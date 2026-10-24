@@ -116,23 +116,35 @@ bootstrap confidence intervals.
 | Payload | Meaning |
 |---|---|
 | `[NLP_META]{json}` | NLP analysis (always first) |
-| `[STATUS]{json}` | Transient notice before any text, e.g. `{"type":"status","message":"Rate limit reached — retrying in 4s…"}` |
+| `[STATUS]{json}` | Transient notice before any text, e.g. `{"type":"status","message":"Rate limit reached — retrying in 4s…"}` or `"Groq busy — switched to backup model"` |
 | `"text chunk"` | JSON-encoded piece of the answer |
 | `[ERROR] message` | Generation failed; the message is user-facing (the stream still ends with `[DONE]`) |
 | `[FINAL]"text"` | The saved answer. Clients replace the streamed text with it |
 | `[RESEARCH_DATA]{json}` | Structured research card |
+| `[MODEL_INFO]{json}` | Who answered, e.g. `{"provider":"openrouter","model":"google/gemma-4-26b-a4b-it:free","fallback":true}` |
 | `[DONE]` | End of stream |
+
+**Backup provider.** When Groq answers 429 (rate limit) or 5xx, or can't be reached, the same
+request goes to OpenRouter right away, without waiting for Groq's `Retry-After`. The backup is an
+agno `OpenRouter` agent with the same tools and instructions. It tries `OPENROUTER_MODEL` first,
+then each model in `OPENROUTER_FALLBACK_MODELS`. Streams send
+`[STATUS] Groq busy — switched to backup model`, and the UI labels the answer "via backup".
+`/api/chat` returns `llm_provider`, `llm_model` and `llm_fallback`. `/api/health` shows the
+fallback config (`fallback`) and who answered last (`last_llm`). The backups are tried once per
+question. If they all fail, the normal Groq retries below take over. Other errors, such as a
+400, don't trigger the fallback. It is on whenever `OPENROUTER_API_KEY` is set;
+`FALLBACK_PROVIDER=none` turns it off.
 
 If generation fails before any text is sent, the server retries up to `LLM_MAX_RETRIES` times
 (default 2), sending a `[STATUS]` event before each wait. On Groq 429s it waits for the
 `Retry-After` the API suggests (capped by `LLM_RETRY_MAX_DELAY`); the Groq SDK's own silent
 retries are disabled. When retries run out, a clear `[ERROR]` follows. It never retries after
 partial output, because that would duplicate text. The UI never re-asks via `/api/chat`, so
-each question costs at most `1 + LLM_MAX_RETRIES` LLM runs.
+each question costs at most `1 + LLM_MAX_RETRIES` Groq runs, plus one run per backup model.
 
 | Layer | Technology |
 |---|---|
-| LLM | Groq `openai/gpt-oss-120b` (default; `openai/gpt-oss-20b` is fastest) or Ollama `qwen2.5:3b` |
+| LLM | Groq `openai/gpt-oss-120b` (default; `openai/gpt-oss-20b` is fastest) or Ollama `qwen2.5:3b`; OpenRouter free models as the automatic backup |
 | Agent framework | agno 1.8.4 |
 | API | FastAPI + uvicorn, SSE streaming, SQLite |
 | NLP | spaCy `en_core_web_sm`, VADER, scikit-learn TF-IDF + LogReg |
@@ -232,6 +244,10 @@ All settings are environment variables, read in `config.py`. `.env` is loaded wi
 | `GROQ_MODEL` | `openai/gpt-oss-120b` | Groq model id. `openai/gpt-oss-20b` is the fastest; `qwen/qwen3.8-27b` is also supported |
 | `LLM_MAX_RETRIES` | `2` | Retries after the first attempt when the LLM fails before any text (e.g. 429). Each retry is announced to the UI |
 | `LLM_RETRY_MAX_DELAY` | `20` | Longest wait (seconds) before a retry, even if Groq's `Retry-After` is longer |
+| `OPENROUTER_API_KEY` | (unset) | **Secret.** Turns on the automatic backup used when Groq is rate-limited or down |
+| `FALLBACK_PROVIDER` | `openrouter` if `OPENROUTER_API_KEY` is set, else `none` | Backup LLM provider. `none` disables it |
+| `OPENROUTER_MODEL` | `google/gemma-4-26b-a4b-it:free` | First backup model (tool calling tested) |
+| `OPENROUTER_FALLBACK_MODELS` | `nvidia/nemotron-3.5-super-vl:free` | Comma-separated models tried in order if the previous one errors or returns 429. Empty means none |
 | `AGENT_TOOL_CALL_LIMIT` | `3` | Max tool calls per answer; every tool round is another full model call |
 | `TOOL_OUTPUT_MAX_CHARS` | `2000` | Tool results are truncated to this many characters before the model sees them |
 | `CACHE_TTL_SECONDS` | `60` | Thread-safe TTL cache for yfinance data and tool results, per ticker + function. `0` disables it |
@@ -255,7 +271,12 @@ Frontend (build-time, `frontend/.env`): `VITE_API_URL` (default `/api`) and
 `VITE_OUTPUTS_URL` (default `/outputs`). Set both when the API runs on a different origin.
 Both are public: anything `VITE_*` ends up in the browser bundle, so never put secrets there.
 
-**Secrets.** Only `GROQ_API_KEY` and `API_KEY` are secret. Keep them in `.env` (git-ignored
+**OpenRouter free tier.** `:free` models allow about 20 requests a minute. They allow 50 requests a
+day without credits, or 1,000 a day once the account has bought at least $10 of credits. Free
+models can also be rate-limited upstream when they're busy, which is why there is a list of
+backup models. Every tool round of an answer is a separate request.
+
+**Secrets.** Only `GROQ_API_KEY`, `OPENROUTER_API_KEY` and `API_KEY` are secret. Keep them in `.env` (git-ignored
 and excluded from the Docker build context) or in your platform's secret store, and pass
 them at runtime (`docker run --env-file .env`, compose `env_file`, PaaS dashboard). They are
 never baked into the image or exposed by `/api/health` (which only reports whether a key is
@@ -276,7 +297,8 @@ npm run lint && npm run build
 
 The backend tests use a temporary SQLite database. `tests/conftest.py` sets `DATABASE_PATH`
 before importing the app, and `persistence.reset_for_tests()` refuses to touch the default
-DB. The tests also remove `GROQ_API_KEY`, mock the LLM, and stub live market data.
+DB. The tests also remove `GROQ_API_KEY` and the OpenRouter settings, mock the LLM (including
+the fallback), and stub live market data.
 
 Coverage includes:
 
@@ -332,9 +354,9 @@ Session ids must match `^[A-Za-z0-9_-]{1,64}$`.
 
 | Method & path | Purpose |
 |---|---|
-| `GET /api/health` | Status (`ok` / `degraded`), LLM provider and config, NLP availability |
+| `GET /api/health` | Status (`ok` / `degraded`), LLM provider and config, backup (`fallback`) config, who answered last (`last_llm`), NLP availability |
 | `GET /api/stats` | In-process usage counters (reset on restart) |
-| `POST /api/chat` | Non-streaming chat → `{response, session_id, nlp_metadata, structured_response}` |
+| `POST /api/chat` | Non-streaming chat → `{response, session_id, nlp_metadata, structured_response, llm_provider, llm_model, llm_fallback}` |
 | `POST /api/chat/stream` | Streaming chat (SSE, see the protocol above) |
 | `DELETE /api/chat/{session_id}` | Delete a session |
 | `GET /api/sessions` · `GET/PATCH /api/sessions/{id}` | List, read and rename your sessions |

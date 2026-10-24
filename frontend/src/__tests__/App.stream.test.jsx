@@ -67,4 +67,25 @@ describe('App streaming', () => {
     const chatCalls = fetchMock.mock.calls.filter(([url]) => String(url).includes('/chat'))
     expect(chatCalls).toHaveLength(1)
   })
+
+  it('shows the backup-model status and labels a fallback answer', async () => {
+    fetchMock.mockImplementation(async (url) => {
+      if (String(url).endsWith('/sessions')) {
+        return new Response(JSON.stringify({ sessions: [] }), { status: 200 })
+      }
+      return streamResponse([
+        'data: [STATUS]{"type":"status","message":"Groq busy — switched to backup model"}\n\n',
+        'data: "Backup answer"\n\n',
+        'data: [FINAL]"Backup answer"\n\n',
+        'data: [MODEL_INFO]{"provider":"openrouter","model":"google/gemma-4-26b-a4b-it:free","fallback":true}\n\n',
+        'data: [DONE]\n\n',
+      ])
+    })
+    render(<App />)
+    fireEvent.change(screen.getByPlaceholderText(/Ask about any stock/), { target: { value: 'hi' } })
+    fireEvent.click(screen.getByLabelText('Send'))
+
+    await waitFor(() => expect(screen.getByText('Backup answer')).toBeInTheDocument())
+    expect(screen.getByText(/via backup · google\/gemma-4-26b-a4b-it:free/)).toBeInTheDocument()
+  })
 })

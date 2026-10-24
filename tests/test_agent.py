@@ -369,7 +369,8 @@ class TestFinancialAgentService:
 
         svc = FinancialAgentService(agent=mock_agent)
         chunks = list(svc.stream("test"))
-        assert chunks == ["Hello ", "World"]
+        assert chunks[:-1] == ["Hello ", "World"]
+        assert chunks[-1].startswith("[MODEL_INFO]")
 
     def test_stream_error_yields_sentinel(self):
         from financial_agent import FinancialAgentService
@@ -392,7 +393,7 @@ class TestFinancialAgentService:
 
         svc = FinancialAgentService(agent=mock_agent)
         chunks = list(svc.stream("test"))
-        assert chunks == ["data"]
+        assert chunks[:-1] == ["data"]
 
     # ── Query execution & retry behaviour ─────────────────────────
 
@@ -449,7 +450,7 @@ class TestFinancialAgentService:
         mock_agent.run.return_value = ["chunk1", "chunk2"]
         svc = FinancialAgentService(agent=mock_agent)
         chunks = list(svc.stream("test"))
-        assert chunks == ["chunk1", "chunk2"]
+        assert chunks[:-1] == ["chunk1", "chunk2"]
 
     def test_stream_retries_before_output_with_status(self):
         """Failures before any text are retried max_retries times, each announced."""

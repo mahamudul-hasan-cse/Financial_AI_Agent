@@ -21,6 +21,24 @@ SESSION_ID_MAX_LENGTH = 64
 
 
 # ── Health ───────────────────────────────────────────────────────────
+class FallbackStatus(BaseModel):
+    """Backup LLM used when Groq is rate-limited or unavailable."""
+
+    provider: str = Field(default="none", description='"openrouter" or "none" (disabled).')
+    configured: bool = False
+    models: list[str] = Field(default_factory=list, description="Backup models, tried in order.")
+    detail: str | None = None
+
+
+class LastLLMUsage(BaseModel):
+    """Provider/model that produced the most recent answer in this process."""
+
+    provider: str | None = None
+    model: str | None = None
+    fallback: bool = False
+    at: str | None = Field(default=None, description="ISO-8601 UTC time of that answer.")
+
+
 class HealthResponse(BaseModel):
     """Response body for ``GET /api/health``."""
 
@@ -29,6 +47,10 @@ class HealthResponse(BaseModel):
     llm_configured: bool = False
     detail: str | None = Field(default=None, description="Why the service is degraded.")
     groq_configured: bool = False
+    fallback: FallbackStatus = Field(default_factory=FallbackStatus)
+    last_llm: LastLLMUsage | None = Field(
+        default=None, description="Who answered last (null until the first answer)."
+    )
     active_sessions: int = 0
     total_messages: int = 0
     nlp_status: NLPStatusDetail = Field(default_factory=NLPStatusDetail)
