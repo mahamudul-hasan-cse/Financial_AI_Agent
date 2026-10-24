@@ -4,6 +4,15 @@ import { loadMarkdown } from './lazyMarkdown.js'
 const Markdown = lazy(loadMarkdown)
 
 const PNG_LINE_RE = /^[a-zA-Z0-9_.-]+\.png\s*$/
+// Trailing "*Data as of … not financial advice.*" added by the backend.
+const DISCLAIMER_RE = /\s*\*?\s*(Data as of [^*\n]*not financial advice\.)\s*\*?\s*$/
+
+// Split the backend's disclaimer off so it renders as small print.
+function splitDisclaimer(text) {
+  const match = (text || '').match(DISCLAIMER_RE)
+  if (!match) return { body: text || '', disclaimer: null }
+  return { body: text.slice(0, match.index).trim(), disclaimer: match[1] }
+}
 // Base URL for generated files; override when the API is on another origin.
 const OUTPUTS_BASE = import.meta.env.VITE_OUTPUTS_URL || '/outputs'
 
@@ -21,7 +30,7 @@ function ResearchCard({ content, data }) {
       textLines.push(line)
     }
   }
-  const displayText = textLines.join('\n').trim()
+  const { body: displayText, disclaimer } = splitDisclaimer(textLines.join('\n').trim())
 
   // Structured artifacts: research_service returns plain strings, e.g. ["aapl_chart.png"]
   const artifactFilenames = (data?.artifacts || []).filter(a =>
@@ -30,7 +39,7 @@ function ResearchCard({ content, data }) {
 
   const chartImages = [...new Set([...artifactFilenames, ...pngLines])]
 
-  if (!displayText && chartImages.length === 0) return null
+  if (!displayText && !disclaimer && chartImages.length === 0) return null
 
   return (
     <div className="research-card" aria-label="Assistant response">
@@ -56,6 +65,8 @@ function ResearchCard({ content, data }) {
           ))}
         </div>
       )}
+
+      {disclaimer && <p className="answer-disclaimer">{disclaimer}</p>}
     </div>
   )
 }

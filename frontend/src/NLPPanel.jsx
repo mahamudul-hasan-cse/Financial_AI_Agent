@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Brain, ChevronRight } from 'lucide-react'
 
 const INTENT_COLORS = {
   stock_price:    '#00D4AA',
@@ -61,7 +62,7 @@ function NLPPanel({ meta }) {
         aria-label={expanded ? 'Collapse NLP analysis' : 'Expand NLP analysis'}
         type="button"
       >
-        <span className="nlp-panel-icon">🧠</span>
+        <Brain className="nlp-panel-icon" size={14} aria-hidden="true" />
 
         <span className="nlp-toggle-summary">
           {/* Intent pill */}
@@ -108,7 +109,7 @@ function NLPPanel({ meta }) {
           {intent_method === 'ml' ? 'ML' : 'KW'}
         </span>
 
-        <span className={`nlp-chevron ${expanded ? 'nlp-chevron-open' : ''}`}>▸</span>
+        <ChevronRight className={`nlp-chevron ${expanded ? 'nlp-chevron-open' : ''}`} size={14} aria-hidden="true" />
       </button>
 
       {expanded && (

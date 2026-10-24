@@ -1,10 +1,18 @@
 import { useEffect, useRef, useState } from 'react'
+import {
+  ArrowUp, Bot, ChartCandlestick, ChevronDown, Copy, History, LineChart, Mic,
+  Moon, RefreshCw, Square, Sun, User, X,
+} from 'lucide-react'
 import { MessageErrorBoundary } from './ErrorBoundary.jsx'
 import ResearchCard from './ResearchCard.jsx'
 import { preloadMarkdown } from './lazyMarkdown.js'
 import NLPPanel from './NLPPanel.jsx'
+import Sidebar from './Sidebar.jsx'
 import StockChart from './StockChart.jsx'
+import StockQuoteCard from './StockQuoteCard.jsx'
+import { hasQuote } from './quote.js'
 import { useToast } from './useToast.jsx'
+import { useSpeechInput, VOICE_LANGUAGES } from './useSpeechInput.js'
 import { apiFetch, createSSEParser, generateSessionId, interpretEvent } from './api.js'
 import './App.css'
 
@@ -23,6 +31,21 @@ const STARTER_PROMPTS = [
   'Summarize Google\'s fundamentals in plain language.',
   'What are the main risks for Meta stock right now?',
 ]
+
+const STORAGE = {
+  theme: 'theme',
+  sidebarCollapsed: 'sidebar-collapsed',
+  voiceLang: 'voice-lang',
+  voiceAutoSend: 'voice-autosend',
+}
+
+function readSetting(key, fallback) {
+  try { return localStorage.getItem(key) ?? fallback } catch { return fallback }
+}
+
+function writeSetting(key, value) {
+  try { localStorage.setItem(key, value) } catch { /* storage disabled */ }
+}
 
 function formatTime(ts) {
   return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -45,21 +68,115 @@ function questionFor(messages, idx) {
   return null
 }
 
-function getSpeechRecognitionConstructor() {
-  if (typeof window === 'undefined') return null
-  return window.SpeechRecognition || window.webkitSpeechRecognition || null
-}
-
 const VOICE_ERRORS = {
   'not-allowed': 'Microphone permission denied. Allow mic access in your browser settings.',
   'service-not-allowed': 'Microphone permission denied. Allow mic access in your browser settings.',
   'audio-capture': 'No microphone found.',
   'no-speech': 'No speech detected. Try again.',
   'network': 'Voice recognition needs an internet connection.',
+  'language-not-supported': 'This voice language is not supported by your browser.',
+  'start-failed': 'Could not start voice input.',
+}
+
+function TypingSkeleton({ label }) {
+  return (
+    <div className="typing-skeleton" role="status" aria-label={label}>
+      <div className="typing-skeleton-head">
+        <span className="typing-dots" aria-hidden="true">
+          <span className="typing-dot" /><span className="typing-dot" /><span className="typing-dot" />
+        </span>
+        <span className="typing-skeleton-label">{label}</span>
+      </div>
+      <span className="skeleton-line" style={{ width: '92%' }} />
+      <span className="skeleton-line" style={{ width: '78%' }} />
+      <span className="skeleton-line" style={{ width: '54%' }} />
+    </div>
+  )
+}
+
+function AgentMessage({ message, isStreaming, loading, loadingStage, canRegenerate, onCopy, onRegenerate }) {
+  const [showDetails, setShowDetails] = useState(false)
+  const quote = message.structuredResponse?.quote
+  const showQuote = hasQuote(quote) && message.structuredResponse?.intent !== 'comparison'
+  const hasDetails = !!message.nlpMeta
+  const waiting = isStreaming && !message.content
+
+  return (
+    <div className="agent-card">
+      {waiting && !message.status && <TypingSkeleton label={loadingStage} />}
+
+      {message.status && !message.content && (
+        <div className="message-status" role="status">{message.status}</div>
+      )}
+
+      {showQuote && <StockQuoteCard quote={quote} />}
+
+      <MessageErrorBoundary>
+        <ResearchCard content={message.content} data={message.structuredResponse} />
+      </MessageErrorBoundary>
+
+      {message.content && (
+        <div className="message-chart">
+          <StockChart content={message.content} />
+        </div>
+      )}
+
+      {!waiting && (
+        <div className="message-footer">
+          <span className="message-time">{formatTime(message.timestamp)}</span>
+          {message.modelInfo?.fallback && (
+            <span
+              className="message-model"
+              title={`Primary model was busy, so ${message.modelInfo.provider} answered`}
+            >via backup · {message.modelInfo.model || message.modelInfo.provider}</span>
+          )}
+          <div className="message-actions">
+            {message.content && !isStreaming && (
+              <>
+                <button
+                  type="button"
+                  className="message-action-btn"
+                  onClick={() => onCopy(message.content)}
+                  aria-label="Copy response"
+                  title="Copy response"
+                ><Copy size={14} aria-hidden="true" /><span>Copy</span></button>
+                {canRegenerate && (
+                  <button
+                    type="button"
+                    className="message-action-btn"
+                    onClick={onRegenerate}
+                    disabled={loading}
+                    aria-label="Regenerate response"
+                    title="Ask the previous question again"
+                  ><RefreshCw size={14} aria-hidden="true" /><span>Regenerate</span></button>
+                )}
+              </>
+            )}
+            {hasDetails && (
+              <button
+                type="button"
+                className={`message-action-btn details-toggle ${showDetails ? 'open' : ''}`}
+                onClick={() => setShowDetails(v => !v)}
+                aria-expanded={showDetails}
+                aria-label={showDetails ? 'Hide details' : 'Show details'}
+                title="Intent, sentiment and entities detected for this question"
+              ><span>Details</span><ChevronDown size={14} aria-hidden="true" /></button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {hasDetails && showDetails && (
+        <div className="message-details">
+          <NLPPanel meta={message.nlpMeta} />
+        </div>
+      )}
+    </div>
+  )
 }
 
 export default function App() {
-  const [theme, setTheme]                   = useState(() => localStorage.getItem('theme') || 'dark')
+  const [theme, setTheme]                   = useState(() => readSetting(STORAGE.theme, 'dark'))
   const [sessionId, setSessionId]           = useState(generateSessionId)
   const [messages, setMessages]             = useState([])
   const [savedSessions, setSavedSessions]   = useState([])
@@ -67,13 +184,21 @@ export default function App() {
   const [loading, setLoading]               = useState(false)
   const [loadingStage, setLoadingStage]     = useState(LOADING_STAGES[0])
   const [historyLoading, setHistoryLoading] = useState(false)
-  const [listening, setListening]           = useState(false)
   const [sidebarOpen, setSidebarOpen]       = useState(false)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => readSetting(STORAGE.sidebarCollapsed, '0') === '1')
+  const [voiceLang, setVoiceLang]           = useState(() => {
+    const saved = readSetting(STORAGE.voiceLang, 'en-US')
+    return VOICE_LANGUAGES.some(l => l.code === saved) ? saved : 'en-US'
+  })
+  const [voiceAutoSend, setVoiceAutoSend]   = useState(() => readSetting(STORAGE.voiceAutoSend, '0') === '1')
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)
-    localStorage.setItem('theme', theme)
+    writeSetting(STORAGE.theme, theme)
   }, [theme])
+  useEffect(() => { writeSetting(STORAGE.sidebarCollapsed, sidebarCollapsed ? '1' : '0') }, [sidebarCollapsed])
+  useEffect(() => { writeSetting(STORAGE.voiceLang, voiceLang) }, [voiceLang])
+  useEffect(() => { writeSetting(STORAGE.voiceAutoSend, voiceAutoSend ? '1' : '0') }, [voiceAutoSend])
 
   function toggleTheme() {
     setTheme(t => t === 'dark' ? 'light' : 'dark')
@@ -82,19 +207,31 @@ export default function App() {
   const bottomRef        = useRef(null)
   const stageTimerRef    = useRef(null)
   const abortRef         = useRef(null)
-  const recognitionRef   = useRef(null)
   const textareaRef      = useRef(null)
-  const voiceSupported   = !!getSpeechRecognitionConstructor()
   const { addToast, ToastContainer } = useToast()
+
+  const speech = useSpeechInput({
+    lang: voiceLang,
+    onTranscript: text => setInput(text),
+    onFinish: (text, { error, spoke }) => {
+      setInput(text)
+      if (voiceAutoSend && spoke && !error && text.trim()) sendMessage(text)
+      else textareaRef.current?.focus()
+    },
+    onError: code => {
+      addToast(VOICE_ERRORS[code] || 'Voice input interrupted.', code === 'no-speech' ? 'info' : 'error')
+    },
+  })
 
   useEffect(() => { loadSavedSessions(); preloadMarkdown() }, [])
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+    // Only follow an active conversation; scrolling the empty state would
+    // push its heading under the navbar on short (mobile) screens.
+    if (messages.length) bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, loading])
   useEffect(() => () => {
     resetStageTimer()
     abortRef.current?.abort()
-    recognitionRef.current?.abort?.()
   }, [])
 
   async function loadSavedSessions(activeId = null) {
@@ -124,13 +261,12 @@ export default function App() {
   function handleNewChat() {
     abortRef.current?.abort('switch')
     resetStageTimer()
-    recognitionRef.current?.abort?.()
-    setListening(false); setMessages([])
+    speech.abort()
+    setMessages([])
     setInput(''); setLoading(false); setSessionId(generateSessionId()); setSidebarOpen(false)
   }
 
-  async function handleDeleteSession(targetId, e) {
-    e.stopPropagation()
+  async function handleDeleteSession(targetId) {
     try {
       const res = await apiFetch(`/chat/${encodeURIComponent(targetId)}`, { method: 'DELETE' })
       if (!res.ok) throw new Error('delete failed')
@@ -140,8 +276,21 @@ export default function App() {
     } catch { addToast('Could not delete chat', 'error') }
   }
 
+  async function handleRenameSession(targetId, title) {
+    try {
+      const res = await apiFetch(`/sessions/${encodeURIComponent(targetId)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ title }),
+      })
+      if (!res.ok) throw new Error('rename failed')
+      const updated = await res.json()
+      setSavedSessions(prev => prev.map(s => s.session_id === targetId ? { ...s, title: updated.title } : s))
+    } catch { addToast('Could not rename chat', 'error') }
+  }
+
   async function handleLoadSession(targetId) {
     abortRef.current?.abort('switch')
+    speech.abort()
     setHistoryLoading(true)
     try {
       const res  = await apiFetch(`/sessions/${encodeURIComponent(targetId)}`)
@@ -159,38 +308,16 @@ export default function App() {
     } finally { setHistoryLoading(false) }
   }
 
-  function handleVoiceInput() {
-    const Ctor = getSpeechRecognitionConstructor()
-    if (!Ctor) { addToast('Voice input not supported in this browser.', 'info'); return }
-    if (listening && recognitionRef.current) { recognitionRef.current.stop(); return }
-    const base = input.trim()
-    const rec = new Ctor()
-    rec.lang = 'en-US'; rec.interimResults = true; rec.continuous = false; rec.maxAlternatives = 1
-    rec.onstart  = () => setListening(true)
-    rec.onend    = () => {
-      setListening(false)
-      if (recognitionRef.current === rec) recognitionRef.current = null
-      textareaRef.current?.focus()
-    }
-    rec.onerror  = e => {
-      setListening(false)
-      if (e?.error === 'aborted') return
-      addToast(VOICE_ERRORS[e?.error] || 'Voice input interrupted.', 'error')
-    }
-    rec.onresult = e => {
-      const t = Array.from(e.results).map(r => r[0]?.transcript || '').join('').trim()
-      setInput(base ? `${base} ${t}` : t)
-    }
-    recognitionRef.current = rec
-    try { rec.start() } catch {
-      recognitionRef.current = null; setListening(false)
-      addToast('Could not start voice input.', 'error')
-    }
+  function handleVoiceToggle() {
+    if (speech.listening) { speech.stop(); return }
+    speech.start(input)
   }
 
   async function sendMessage(prefilled = null) {
     const text = (prefilled ?? input).trim()
     if (!text || loading) return
+    // The textarea already holds the transcript; drop the live session.
+    if (speech.listening) speech.abort()
 
     const userMsg      = { role: 'user',  content: text, timestamp: Date.now() }
     const agentTs      = Date.now() + 1
@@ -316,8 +443,10 @@ export default function App() {
     if (question) sendMessage(question)
   }
 
-  const canSend   = input.trim().length > 0 && !loading
+  const canSend    = input.trim().length > 0 && !loading
   const emptyState = messages.length === 0
+  const listening  = speech.listening
+  const micLabel   = listening ? 'Stop listening' : 'Voice input'
 
   return (
     <div className="app-shell">
@@ -326,61 +455,52 @@ export default function App() {
       {/* ── Navbar ── */}
       <nav className="navbar">
         <div className="navbar-brand">
-          <div className="navbar-logo">📈</div>
-          <span className="navbar-title">Financial <span>AI</span> Agent</span>
+          <button
+            className="icon-btn mobile-only"
+            onClick={() => setSidebarOpen(v => !v)}
+            type="button"
+            aria-label={sidebarOpen ? 'Close chat history' : 'Open chat history'}
+            aria-expanded={sidebarOpen}
+            title="Chat history"
+          >
+            {sidebarOpen ? <X size={18} aria-hidden="true" /> : <History size={18} aria-hidden="true" />}
+          </button>
+          <div className="navbar-logo" aria-hidden="true"><LineChart size={18} /></div>
+          <span className="navbar-title">
+            <span className="title-full">Financial <span className="title-accent">AI</span> Agent</span>
+            <span className="title-short" aria-hidden="true">Fin<span className="title-accent">Agent</span></span>
+          </span>
         </div>
         <div className="navbar-right">
-          <button className="theme-toggle" onClick={toggleTheme} type="button">
-            <span className="theme-toggle-icon">{theme === 'dark' ? '☀️' : '🌙'}</span>
-            {theme === 'dark' ? 'Light Mode' : 'Dark Mode'}
-          </button>
-          <button className="ghost-btn mobile-only small-btn" onClick={() => setSidebarOpen(v => !v)} type="button">
-            {sidebarOpen ? '✕ Close' : '☰ History'}
+          <button
+            className="theme-toggle"
+            onClick={toggleTheme}
+            type="button"
+            aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+            title={theme === 'dark' ? 'Light mode' : 'Dark mode'}
+          >
+            {theme === 'dark' ? <Sun size={16} aria-hidden="true" /> : <Moon size={16} aria-hidden="true" />}
+            <span className="theme-toggle-label">{theme === 'dark' ? 'Light mode' : 'Dark mode'}</span>
           </button>
         </div>
       </nav>
 
       {/* ── Body ── */}
       <div className="body-row">
-        {/* Sidebar */}
-        <aside className={`history-sidebar ${sidebarOpen ? 'open' : ''}`}>
-          <div className="history-header">
-            <p className="eyebrow">Conversations</p>
-            <h2>Chat History</h2>
-          </div>
-
-          <button className="new-chat-btn" onClick={handleNewChat} type="button">
-            + New Chat
-          </button>
-
-          <div className="history-list">
-            {savedSessions.length === 0 ? (
-              <div className="empty-note">Your conversations will appear here.</div>
-            ) : (
-              savedSessions.map(session => (
-                <div
-                  key={session.session_id}
-                  className={`history-item ${session.session_id === sessionId ? 'active' : ''}`}
-                >
-                  <button
-                    type="button"
-                    className="history-item-content"
-                    onClick={() => handleLoadSession(session.session_id)}
-                  >
-                    <strong>{session.title}</strong>
-                    <p>{session.preview || 'Open to continue the conversation.'}</p>
-                  </button>
-                  <button
-                    type="button"
-                    className="history-delete-btn"
-                    title="Delete chat"
-                    onClick={e => handleDeleteSession(session.session_id, e)}
-                  >✕</button>
-                </div>
-              ))
-            )}
-          </div>
-        </aside>
+        <Sidebar
+          sessions={savedSessions}
+          activeId={sessionId}
+          collapsed={sidebarCollapsed}
+          mobileOpen={sidebarOpen}
+          onToggleCollapse={() => setSidebarCollapsed(v => !v)}
+          onNewChat={handleNewChat}
+          onSelect={handleLoadSession}
+          onRename={handleRenameSession}
+          onDelete={handleDeleteSession}
+        />
+        {sidebarOpen && (
+          <div className="sidebar-backdrop mobile-only" onClick={() => setSidebarOpen(false)} aria-hidden="true" />
+        )}
 
         {/* Main chat */}
         <main className="chat-layout">
@@ -391,7 +511,7 @@ export default function App() {
               </div>
             ) : emptyState ? (
               <div className="empty-state">
-                <div className="empty-hero-icon">📊</div>
+                <div className="empty-hero-icon" aria-hidden="true"><ChartCandlestick size={30} /></div>
                 <h2>Ask me anything about markets</h2>
                 <p>Get real-time prices, analyst ratings, charts, Excel reports, and in-depth analysis — all in one place.</p>
                 <div className="starter-prompts">
@@ -412,75 +532,30 @@ export default function App() {
                 return (
                   <div className={`message-row ${message.role}`} key={msgId}>
                     {message.role === 'agent' && (
-                      <div className="msg-avatar agent-avatar">🤖</div>
+                      <div className="msg-avatar agent-avatar" aria-hidden="true"><Bot size={18} /></div>
                     )}
 
                     <div className="message-bubble">
                       {message.role === 'agent' ? (
-                        <div className="agent-card">
-
-                          <MessageErrorBoundary>
-                            <ResearchCard content={message.content} data={message.structuredResponse} />
-                          </MessageErrorBoundary>
-
-                          {message.nlpMeta && (
-                            <NLPPanel meta={message.nlpMeta} />
-                          )}
-
-                          {message.status && !message.content && (
-                            <div className="message-status" role="status">{message.status}</div>
-                          )}
-
-                          {message.content && (
-                            <div className="message-chart">
-                              <StockChart content={message.content} />
-                            </div>
-                          )}
-
-                          <div className="message-footer">
-                            <span className="message-time">{formatTime(message.timestamp)}</span>
-                            {message.modelInfo?.fallback && (
-                              <span
-                                className="message-model"
-                                title={`Primary model was busy, so ${message.modelInfo.provider} answered`}
-                              >via backup · {message.modelInfo.model || message.modelInfo.provider}</span>
-                            )}
-                            {message.content && !isStreaming && (
-                              <div className="message-actions">
-                                <button
-                                  type="button"
-                                  className="message-action-btn"
-                                  onClick={() => handleCopy(message.content)}
-                                  aria-label="Copy response"
-                                  title="Copy response"
-                                >⧉ Copy</button>
-                                {questionFor(messages, idx) && (
-                                  <button
-                                    type="button"
-                                    className="message-action-btn"
-                                    onClick={() => handleRegenerate(idx)}
-                                    disabled={loading}
-                                    aria-label="Regenerate response"
-                                    title="Ask the previous question again"
-                                  >↻ Regenerate</button>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        </div>
+                        <AgentMessage
+                          message={message}
+                          isStreaming={isStreaming}
+                          loading={loading}
+                          loadingStage={loadingStage}
+                          canRegenerate={!!questionFor(messages, idx)}
+                          onCopy={handleCopy}
+                          onRegenerate={() => handleRegenerate(idx)}
+                        />
                       ) : (
-                        <p className="plain-message">{message.content}</p>
-                      )}
-
-                      {message.role === 'user' && (
-                        <span className="message-time" style={{ paddingRight: 4 }}>
-                          {formatTime(message.timestamp)}
-                        </span>
+                        <>
+                          <p className="plain-message">{message.content}</p>
+                          <span className="message-time">{formatTime(message.timestamp)}</span>
+                        </>
                       )}
                     </div>
 
                     {message.role === 'user' && (
-                      <div className="msg-avatar user-avatar">👤</div>
+                      <div className="msg-avatar user-avatar" aria-hidden="true"><User size={18} /></div>
                     )}
                   </div>
                 )
@@ -489,71 +564,94 @@ export default function App() {
             <div ref={bottomRef} />
           </div>
 
-          {loading && (
-            <div className="loading-ribbon" role="status">
-              <div className="typing-dots">
-                <span className="typing-dot" />
-                <span className="typing-dot" />
-                <span className="typing-dot" />
-              </div>
-              <span>{loadingStage}</span>
-            </div>
-          )}
-
           {/* Composer */}
           <div className="composer-wrap">
             <div className="composer">
-              <div className="composer-input-row">
-                <textarea
-                  ref={textareaRef}
-                  value={input}
-                  rows={1}
-                  onChange={e => setInput(e.target.value)}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault(); sendMessage()
-                    }
-                  }}
-                  placeholder="Ask about any stock, comparison, or market…"
-                />
+              <div className={`composer-input-row ${listening ? 'is-listening' : ''}`}>
+                <div className="composer-field">
+                  {listening && (
+                    <span className="listening-label" role="status">
+                      <span className="listening-dot" aria-hidden="true" />Listening…
+                    </span>
+                  )}
+                  <textarea
+                    ref={textareaRef}
+                    value={input}
+                    rows={1}
+                    readOnly={listening}
+                    aria-label="Message"
+                    onChange={e => setInput(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault(); sendMessage()
+                      }
+                    }}
+                    placeholder="Ask about any stock, comparison, or market…"
+                  />
+                </div>
                 <div className="composer-actions">
-                  {voiceSupported && (
+                  {speech.supported && (
                     <button
-                      className={`voice-btn ${listening ? 'active' : ''}`}
-                      onClick={handleVoiceInput}
+                      className={`round-btn mic-btn ${listening ? 'listening' : ''}`}
+                      onClick={handleVoiceToggle}
                       type="button"
                       disabled={loading}
                       aria-pressed={listening}
-                      aria-label={listening ? 'Stop listening' : 'Voice input'}
-                      title={listening ? 'Stop listening' : 'Voice input'}
+                      aria-label={micLabel}
+                      title={loading ? 'Voice input unavailable while answering' : micLabel}
                     >
-                      🎙
+                      <Mic size={18} aria-hidden="true" />
                     </button>
                   )}
                   {loading ? (
                     <button
-                      className="send-btn"
+                      className="round-btn send-btn"
                       onClick={handleStop}
                       type="button"
                       title="Stop generating"
                       aria-label="Stop generating"
                     >
-                      ■
+                      <Square size={14} fill="currentColor" aria-hidden="true" />
                     </button>
                   ) : (
                     <button
-                      className="send-btn"
+                      className="round-btn send-btn"
                       disabled={!canSend}
                       onClick={() => sendMessage()}
                       type="button"
                       title="Send"
                       aria-label="Send"
                     >
-                      ➤
+                      <ArrowUp size={18} strokeWidth={2.5} aria-hidden="true" />
                     </button>
                   )}
                 </div>
               </div>
+              {speech.supported && (
+                <div className="voice-options">
+                  <label className="voice-option">
+                    <span>Voice</span>
+                    <select
+                      value={voiceLang}
+                      onChange={e => setVoiceLang(e.target.value)}
+                      disabled={listening}
+                      aria-label="Voice language"
+                    >
+                      {VOICE_LANGUAGES.map(l => (
+                        <option key={l.code} value={l.code}>{l.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="voice-option">
+                    <input
+                      type="checkbox"
+                      checked={voiceAutoSend}
+                      onChange={e => setVoiceAutoSend(e.target.checked)}
+                    />
+                    <span>Auto-send after speaking</span>
+                  </label>
+                </div>
+              )}
             </div>
           </div>
         </main>
