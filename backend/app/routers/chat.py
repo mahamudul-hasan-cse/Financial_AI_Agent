@@ -3,9 +3,13 @@
 SSE protocol (``POST /api/chat/stream``), one ``data:`` line per event:
 
 * ``[NLP_META]{json}``      – NLP analysis of the question (always first)
+* ``[STATUS]{json}``        – transient progress, e.g. a rate-limit retry:
+  ``{"type": "status", "message": "Rate limit reached — retrying in 4s…"}``.
+  Sent only before any answer text; may repeat (``LLM_MAX_RETRIES``).
 * ``"<json string>"``       – a chunk of answer text (JSON-encoded so
   newlines survive SSE framing)
-* ``[ERROR] <message>``     – generation failed (stream still ends with DONE)
+* ``[ERROR] <message>``     – generation failed; the message is user-facing
+  (stream still ends with DONE)
 * ``[FINAL]"<json string>"`` – the cleaned, persisted answer; clients should
   replace the streamed text with it
 * ``[RESEARCH_DATA]{json}`` – structured research card
@@ -19,7 +23,7 @@ import logging
 import time
 from typing import Generator
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 import persistence
@@ -34,8 +38,10 @@ logger = logging.getLogger("api.chat")
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
-_STREAM_ERROR = "[ERROR] Unable to generate a response right now. Please try again in a moment."
-_MAX_STREAM_ATTEMPTS = 2
+# Per-client limit (RATE_LIMIT_PER_MINUTE), checked before any session work.
+_RATE_LIMITED = [Depends(session_service.enforce_client_rate_limit)]
+
+_STREAM_ERROR = f"{chat_service.ERROR_PREFIX} {chat_service.GENERIC_ERROR_MESSAGE}"
 
 
 def _sse(payload: str) -> str:
@@ -56,7 +62,7 @@ def _ready_agent():
     return service
 
 
-@router.post("", response_model=ChatResponse)
+@router.post("", response_model=ChatResponse, dependencies=_RATE_LIMITED)
 def chat(req: ChatRequest, request: Request, client_id: ClientId) -> ChatResponse:
     """Non-streaming chat: NLP preprocessing → agent → structured response."""
     session_id, history = session_service.get_or_create_session(req.session_id, client_id)
@@ -75,6 +81,11 @@ def chat(req: ChatRequest, request: Request, client_id: ClientId) -> ChatRespons
         content: str = service.run(prompt, session_id=session_id)
     except chat_service.AgentNotConfiguredError as exc:
         raise HTTPException(status_code=503, detail="The AI model is not configured.") from exc
+    except chat_service.LLMRateLimitError as exc:
+        logger.warning("LLM rate limit persisted for session %s", session_id)
+        raise HTTPException(
+            status_code=503, detail=str(exc), headers={"Retry-After": "60"}
+        ) from exc
     except Exception as exc:
         logger.exception("Agent error for session %s", session_id)
         raise HTTPException(
@@ -99,7 +110,7 @@ def chat(req: ChatRequest, request: Request, client_id: ClientId) -> ChatRespons
     )
 
 
-@router.post("/stream")
+@router.post("/stream", dependencies=_RATE_LIMITED)
 def chat_stream(req: ChatRequest, request: Request, client_id: ClientId) -> StreamingResponse:
     """Streaming chat endpoint (Server-Sent Events) — see module docstring."""
     session_id, history = session_service.get_or_create_session(req.session_id, client_id)
@@ -120,33 +131,31 @@ def chat_stream(req: ChatRequest, request: Request, client_id: ClientId) -> Stre
         )
 
         collected: list[str] = []
-        errored = False
+        error_event: str | None = None
         t0 = time.time()
         try:
-            for attempt in range(1, _MAX_STREAM_ATTEMPTS + 1):
-                errored = False
-                for text in service.stream(prompt, session_id=session_id):
-                    if text.startswith("[ERROR]"):
-                        errored = True
-                        break
-                    collected.append(text)
-                    yield _sse(json.dumps(text))
-                # Retry only if nothing reached the client yet — retrying after
-                # partial output would duplicate text.
-                if not (errored and not collected):
+            # Retries (and their [STATUS] notices) happen inside service.stream().
+            for text in service.stream(prompt, session_id=session_id):
+                if text.startswith(chat_service.STATUS_PREFIX):
+                    message = text[len(chat_service.STATUS_PREFIX):].strip()
+                    yield _sse(
+                        chat_service.STATUS_PREFIX
+                        + json.dumps({"type": "status", "message": message})
+                    )
+                    continue
+                if text.startswith(chat_service.ERROR_PREFIX):
+                    error_event = text
                     break
-                logger.warning("Stream attempt %d failed before output; retrying", attempt)
-            if not collected and attempt > 1:
-                # The retry produced nothing at all — report the original failure.
-                errored = True
+                collected.append(text)
+                yield _sse(json.dumps(text))
         except Exception:
             logger.exception("Unexpected error in stream generator for session %s", session_id)
-            errored = True
+            error_event = _STREAM_ERROR
 
         record_response_time(round((time.time() - t0) * 1000, 1))
 
-        if errored:
-            yield _sse(_STREAM_ERROR)
+        if error_event:
+            yield _sse(error_event)
         elif collected:
             final = chat_service.append_disclaimer(chat_service.clean_response("".join(collected)))
             structured = build_structured_response(req.message, final, nlp_meta)

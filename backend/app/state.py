@@ -7,6 +7,7 @@ single worker.  SQLite (``persistence.py``) is the durable store; the
 
 from __future__ import annotations
 
+import threading
 from collections import defaultdict
 from typing import TypedDict
 
@@ -19,6 +20,7 @@ SESSION_TTL: int = settings.session_ttl
 RATE_LIMIT_WINDOW: int = settings.rate_limit_window
 RATE_LIMIT_MAX: int = settings.rate_limit_max
 IP_RATE_LIMIT_MAX: int = settings.ip_rate_limit_max
+RATE_LIMIT_PER_MINUTE: int = settings.rate_limit_per_minute
 API_KEY: str | None = settings.api_key
 
 
@@ -38,6 +40,10 @@ sessions: dict[str, SessionData] = {}
 _rate_limits: dict[str, list[float]] = defaultdict(list)
 # Maps client IP -> list of request timestamps (per-IP sliding window)
 _ip_rate_limits: dict[str, list[float]] = defaultdict(list)
+# Maps "client:<X-Client-Id>" (or "ip:<addr>") -> timestamps, for chat endpoints
+_client_rate_limits: dict[str, list[float]] = defaultdict(list)
+# Guards the three rate-limit stores (sync endpoints run in a thread pool)
+rate_limit_lock = threading.Lock()
 
 
 class _StatsStore(TypedDict):

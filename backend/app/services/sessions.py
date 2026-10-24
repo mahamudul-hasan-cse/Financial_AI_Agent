@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import math
+import re
 import time
 import uuid
 from typing import Any
@@ -12,8 +13,16 @@ from fastapi import HTTPException, Request
 
 import persistence
 from backend.app import state
-from backend.app.security import client_ip
-from backend.app.state import SessionData, _ip_rate_limits, _rate_limits, _stats, sessions
+from backend.app.security import CLIENT_ID_PATTERN, client_ip
+from backend.app.state import (
+    SessionData,
+    _client_rate_limits,
+    _ip_rate_limits,
+    _rate_limits,
+    _stats,
+    rate_limit_lock,
+    sessions,
+)
 
 logger = logging.getLogger("api.sessions")
 
@@ -153,17 +162,52 @@ def list_client_sessions(client_id: str) -> list[dict[str, Any]]:
 
 # ── Rate limiting ────────────────────────────────────────────────────
 
+_CLIENT_ID_RE = re.compile(CLIENT_ID_PATTERN)
+_MAX_TRACKED_KEYS = 10_000
+
+
 def _sliding_window_check(
-    store: dict[str, list[float]], key: str, max_requests: int
+    store: dict[str, list[float]], key: str, max_requests: int, window: int | None = None
 ) -> float | None:
     """Return ``None`` if allowed, else seconds until the next slot opens."""
+    window = state.RATE_LIMIT_WINDOW if window is None else window
     now = time.time()
-    store[key] = [t for t in store[key] if now - t < state.RATE_LIMIT_WINDOW]
-    if len(store[key]) >= max_requests:
-        oldest = store[key][0]
-        return math.ceil(state.RATE_LIMIT_WINDOW - (now - oldest))
-    store[key].append(now)
+    with rate_limit_lock:
+        if len(store) > _MAX_TRACKED_KEYS:
+            # Drop idle keys so a flood of distinct ids can't grow memory forever.
+            for stale in [k for k, ts in store.items() if not ts or now - ts[-1] >= window]:
+                del store[stale]
+        store[key] = [t for t in store[key] if now - t < window]
+        if len(store[key]) >= max_requests:
+            oldest = store[key][0]
+            return max(1, math.ceil(window - (now - oldest)))
+        store[key].append(now)
     return None
+
+
+def enforce_client_rate_limit(request: Request) -> None:
+    """FastAPI dependency: ``RATE_LIMIT_PER_MINUTE`` chat requests per client.
+
+    Keyed by the ``X-Client-Id`` header when valid, else the client IP.
+    ``RATE_LIMIT_PER_MINUTE=0`` disables the check.  Raises 429 with a JSON
+    body (``{"detail": ...}``) and a ``Retry-After`` header.
+    """
+    limit = state.RATE_LIMIT_PER_MINUTE
+    if limit <= 0:
+        return
+    header = request.headers.get("X-Client-Id", "")
+    key = f"client:{header}" if _CLIENT_ID_RE.fullmatch(header) else f"ip:{client_ip(request)}"
+    retry_after = _sliding_window_check(_client_rate_limits, key, limit, window=60)
+    if retry_after is not None:
+        logger.warning("Client rate limit hit for %s", key.split(":", 1)[0])
+        raise HTTPException(
+            status_code=429,
+            detail=(
+                f"Too many requests: limit is {limit} chat messages per minute. "
+                f"Try again in {retry_after}s."
+            ),
+            headers={"Retry-After": str(retry_after)},
+        )
 
 
 def check_rate_limit(session_id: str, request: Request | None = None) -> None:

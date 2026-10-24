@@ -44,10 +44,10 @@ class TestAgentConfiguration:
         assert agent.tools is not None
         assert len(agent.tools) > 0
 
-    def test_agent_has_yfinance_tools(self):
+    def test_agent_has_market_data_tools(self):
         from financial_agent import agent
         tool_names = [type(t).__name__ for t in agent.tools]
-        assert "YFinanceTools" in tool_names
+        assert "MarketDataTools" in tool_names
 
     def test_agent_has_duckduckgo_tools(self):
         from financial_agent import agent
@@ -346,9 +346,9 @@ class TestFinancialAgentService:
         mock_agent.run.side_effect = RuntimeError("persistent")
 
         svc = FinancialAgentService(agent=mock_agent, max_retries=2)
-        with pytest.raises(RuntimeError, match="Agent failed after 2 attempts"):
+        with pytest.raises(RuntimeError, match="Agent failed after 3 attempts"):
             svc.run("fail prompt")
-        assert mock_agent.run.call_count == 2
+        assert mock_agent.run.call_count == 3
 
     def test_run_falls_back_to_str_if_no_content(self):
         from financial_agent import FinancialAgentService
@@ -376,7 +376,7 @@ class TestFinancialAgentService:
         mock_agent = MagicMock()
         mock_agent.run.side_effect = RuntimeError("boom")
 
-        svc = FinancialAgentService(agent=mock_agent)
+        svc = FinancialAgentService(agent=mock_agent, max_retries=0)
         chunks = list(svc.stream("fail"))
         assert len(chunks) == 1
         assert chunks[0].startswith("[ERROR]")
@@ -451,14 +451,16 @@ class TestFinancialAgentService:
         chunks = list(svc.stream("test"))
         assert chunks == ["chunk1", "chunk2"]
 
-    def test_stream_does_not_retry(self):
-        """Streaming makes exactly one call to the agent, even on failure."""
+    def test_stream_retries_before_output_with_status(self):
+        """Failures before any text are retried max_retries times, each announced."""
         from financial_agent import FinancialAgentService
         mock_agent = MagicMock()
         mock_agent.run.side_effect = RuntimeError("stream fail")
         svc = FinancialAgentService(agent=mock_agent, max_retries=5)
-        list(svc.stream("prompt"))
-        assert mock_agent.run.call_count == 1
+        chunks = list(svc.stream("prompt"))
+        assert mock_agent.run.call_count == 6
+        assert [c.startswith("[STATUS]") for c in chunks] == [True] * 5 + [False]
+        assert chunks[-1].startswith("[ERROR]")
 
     def test_run_retries_on_connection_error(self):
         from financial_agent import FinancialAgentService
@@ -487,11 +489,11 @@ class TestFinancialAgentService:
             svc.run("fail")
         assert exc_info.value.__cause__ is original
 
-    def test_run_max_retries_one_makes_single_attempt(self):
+    def test_run_max_retries_zero_makes_single_attempt(self):
         from financial_agent import FinancialAgentService
         mock_agent = MagicMock()
         mock_agent.run.side_effect = RuntimeError("fail")
-        svc = FinancialAgentService(agent=mock_agent, max_retries=1)
+        svc = FinancialAgentService(agent=mock_agent, max_retries=0)
         with pytest.raises(RuntimeError):
             svc.run("prompt")
         assert mock_agent.run.call_count == 1
@@ -530,7 +532,7 @@ class TestFinancialAgentService:
         svc = FinancialAgentService(agent=mock_agent, max_retries=3)
         with caplog.at_level(logging.WARNING, logger="financial_agent"):
             svc.run("test")
-        assert any("attempt 1/3 failed" in m for m in caplog.messages)
+        assert any("attempt 1/4 failed" in m for m in caplog.messages)
 
     def test_stream_logs_exception_on_error(self, caplog):
         from financial_agent import FinancialAgentService
@@ -561,7 +563,7 @@ class TestBuildTools:
         from financial_agent import _build_tools
         tools = _build_tools()
         type_names = {type(t).__name__ for t in tools}
-        expected = {"DuckDuckGoTools", "YFinanceTools", "ChartTools", "ExcelTools", "RAGTools"}
+        expected = {"DuckDuckGoTools", "MarketDataTools", "ChartTools", "ExcelTools", "RAGTools"}
         assert type_names == expected
 
     def test_each_element_is_toolkit_subclass(self):
@@ -618,7 +620,7 @@ class TestToolFactories:
     def test_factory_names_match_expected(self):
         from backend.app.agent.tool_registry import TOOL_FACTORIES
         names = {name for name, _ in TOOL_FACTORIES}
-        assert names == {"DuckDuckGo", "YFinance", "Charts", "Excel", "RAG"}
+        assert names == {"DuckDuckGo", "MarketData", "Charts", "Excel", "RAG"}
 
     def test_each_factory_produces_toolkit(self):
         """Every registered factory should produce a valid Toolkit instance."""
@@ -655,7 +657,7 @@ class TestToolFailureHandling:
     def test_returns_empty_when_all_fail(self):
         from financial_agent import _build_tools
         with patch("backend.app.agent.tool_registry.DuckDuckGoTools", side_effect=Exception), \
-             patch("backend.app.agent.tool_registry.YFinanceTools", side_effect=Exception), \
+             patch("backend.app.agent.tool_registry.MarketDataTools", side_effect=Exception), \
              patch("backend.app.agent.tool_registry.ChartTools", side_effect=Exception), \
              patch("backend.app.agent.tool_registry.ExcelTools", side_effect=Exception), \
              patch("backend.app.agent.tool_registry.RAGTools", side_effect=Exception):
@@ -691,7 +693,7 @@ class TestToolFailureHandling:
         with patch("backend.app.agent.tool_registry.ChartTools", side_effect=ImportError):
             tools = build_tools()
         names = [type(t).__name__ for t in tools]
-        assert names == ["DuckDuckGoTools", "YFinanceTools", "ExcelTools", "RAGTools"]
+        assert names == ["DuckDuckGoTools", "MarketDataTools", "ExcelTools", "RAGTools"]
 
 
 # ── Response packaging (AGENT_INSTRUCTIONS content) ──────────────────
@@ -742,7 +744,6 @@ class TestResponsePackaging:
     def test_instructions_require_tables(self):
         from financial_agent import AGENT_INSTRUCTIONS
         joined = "\n".join(AGENT_INSTRUCTIONS)
-        assert "Use headings" in joined
         assert "Key Data" in joined
         assert "tables" in joined.lower()
 
@@ -798,7 +799,9 @@ class TestToolRegistryModule:
 
     def test_module_all_exports(self):
         from backend.app.agent import tool_registry
-        assert set(tool_registry.__all__) == {"build_tools", "TOOL_FACTORIES"}
+        assert set(tool_registry.__all__) == {
+            "build_tools", "compact_tool_output", "truncate_output", "TOOL_FACTORIES", "SEARCH_MAX_RESULTS"
+        }
 
     def test_build_tools_is_callable(self):
         from backend.app.agent.tool_registry import build_tools

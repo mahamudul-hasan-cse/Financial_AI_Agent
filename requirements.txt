@@ -6,10 +6,15 @@
 #   pip install torch==2.14.1 --index-url https://download.pytorch.org/whl/cpu
 
 # Agent + LLM providers
+# groq + httpx are pinned as a pair: older groq releases pass `proxies=`, which
+# httpx>=0.28 rejects, leaving a half-built client whose __del__ raises
+# "SyncHttpxClientWrapper has no attribute '_state'". The same warning also
+# came from agno deep-copying the Groq SDK's default client; the app now
+# passes its own httpx.Client (backend/app/agent/financial_agent.py).
 agno==1.8.4
 groq==1.7.0
-ollama==0.6.3
 httpx==0.28.1
+ollama==0.6.3
 
 # API
 fastapi==0.162.0

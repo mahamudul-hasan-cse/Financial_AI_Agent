@@ -443,20 +443,14 @@ class RAGTools(Toolkit):
         return self._retriever_override or get_default_retriever()
 
     def retrieve_financial_context(self, query: str, top_k: int = 3) -> str:
-        """Retrieve relevant financial knowledge chunks for a user query.
+        """Look up definitions of financial concepts (P/E, beta, RSI, dividends, EV/EBITDA).
 
-        Use this tool FIRST when the user asks about valuation metrics (P/E, EV/EBITDA),
-        analyst ratings, technical indicators (RSI, moving averages), dividends, beta,
-        market cap, or any foundational financial concept.
+        Only for explaining concepts; live prices and company data come from the
+        market data tools.
 
         Args:
-            query: The user's question or topic to search for.
-            top_k: Number of knowledge chunks to retrieve (default 3, max 5).
-
-        Returns:
-            Formatted string with the most relevant knowledge snippets, their
-            similarity scores, and source citation IDs. Use these as grounding
-            context in your response.
+            query: The concept or question to look up.
+            top_k: Number of snippets (default 3, max 5).
         """
         top_k = max(1, min(int(top_k), 5))
         chunks = self._retriever.retrieve(query, top_k=top_k)

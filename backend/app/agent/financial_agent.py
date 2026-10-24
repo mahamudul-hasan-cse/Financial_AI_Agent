@@ -4,6 +4,11 @@ Provides a thin ``FinancialAgentService`` that wraps the raw ``agno``
 ``Agent`` with retry logic, clean return types, and structured error
 handling so the API layer doesn't need to know agent internals.
 
+Retries (``LLM_MAX_RETRIES``, default 2) are handled here rather than in the
+Groq SDK so streaming clients can be told about them: :meth:`stream` yields
+``"[STATUS] Retrying in Ns…"`` sentinels while it waits, honouring Groq's
+``Retry-After`` on 429s, and a final ``"[ERROR] …"`` when it gives up.
+
 Public API
 ----------
 - ``FinancialAgentService`` – the main service class.
@@ -17,19 +22,26 @@ from __future__ import annotations
 
 import argparse
 import logging
+import math
+import os
 import re
+import threading
 import time
 from typing import Any, Generator, Sequence
 
-from agno.agent import Agent
-from agno.models.groq import Groq
-from agno.tools import Toolkit
+os.environ.setdefault("AGNO_TELEMETRY", "false")
 
-from backend.app.agent.prompts import AGENT_INSTRUCTIONS
-from backend.app.agent.tool_registry import build_tools
-from config import (
+import httpx  # noqa: E402
+from agno.agent import Agent  # noqa: E402
+from agno.models.groq import Groq  # noqa: E402
+from agno.tools import Toolkit  # noqa: E402
+
+from backend.app.agent.prompts import AGENT_INSTRUCTIONS  # noqa: E402
+from backend.app.agent.tool_registry import build_tools, compact_tool_output  # noqa: E402
+from config import (  # noqa: E402
     DEFAULT_GROQ_MODEL,
     get_groq_api_key,
+    get_groq_model,
     get_llm_provider,
     settings,
 )
@@ -39,6 +51,9 @@ logger = logging.getLogger("financial_agent")
 __all__ = [  # noqa: F822
     "FinancialAgentService",
     "AgentNotConfiguredError",
+    "LLMRateLimitError",
+    "STATUS_PREFIX",
+    "ERROR_PREFIX",
     "agent_service",
     "agent",  # resolved lazily via __getattr__
     "create_agent",
@@ -53,10 +68,20 @@ __all__ = [  # noqa: F822
 
 # ── Model configuration ──────────────────────────────────────────────
 # All values come from config.py (env vars: LLM_PROVIDER, GROQ_MODEL,
-# OLLAMA_MODEL, OLLAMA_HOST).
+# OLLAMA_MODEL, OLLAMA_HOST).  DEFAULT_MODEL_ID is the built-in default;
+# create_agent() uses GROQ_MODEL when set.
 DEFAULT_MODEL_ID: str = DEFAULT_GROQ_MODEL
 DEFAULT_OLLAMA_MODEL: str = settings.ollama_model
-_DEFAULT_MAX_RETRIES: int = 3
+# Retries *after* the first attempt (LLM_MAX_RETRIES).
+_DEFAULT_MAX_RETRIES: int = settings.llm_max_retries
+
+# Sentinel prefixes yielded by FinancialAgentService.stream().
+STATUS_PREFIX = "[STATUS]"
+ERROR_PREFIX = "[ERROR]"
+GENERIC_ERROR_MESSAGE = "Unable to generate a response right now. Please try again in a moment."
+RATE_LIMIT_ERROR_MESSAGE = (
+    "The AI service is busy (rate limit reached). Please wait a minute and try again."
+)
 
 # Provider selected at import time ("groq" or "ollama"). ``create_agent``
 # re-reads the environment on every call so tests and CLIs can switch it.
@@ -67,6 +92,75 @@ _OLLAMA_HOST: str = settings.ollama_host
 
 class AgentNotConfiguredError(RuntimeError):
     """Raised when no usable LLM provider is configured (e.g. missing GROQ_API_KEY)."""
+
+
+class LLMRateLimitError(RuntimeError):
+    """Raised by :meth:`FinancialAgentService.run` when retries end on a rate limit."""
+
+
+# ── Retry helpers ────────────────────────────────────────────────────
+
+_RETRY_IN_RE = re.compile(r"try again in (?:(\d+)m)?(\d+(?:\.\d+)?)s", re.IGNORECASE)
+
+
+def _sleep(seconds: float) -> None:
+    """Indirection so tests can skip real back-off waits."""
+    time.sleep(seconds)
+
+
+def _exception_chain(exc: BaseException) -> list[BaseException]:
+    chain: list[BaseException] = []
+    current: BaseException | None = exc
+    while current is not None and current not in chain and len(chain) < 6:
+        chain.append(current)
+        current = current.__cause__ or current.__context__
+    return chain
+
+
+def is_rate_limit_error(exc: BaseException) -> bool:
+    """True for HTTP 429 / rate-limit errors from Groq (directly or via agno)."""
+    for err in _exception_chain(exc):
+        status = getattr(err, "status_code", None)
+        if status is None:
+            status = getattr(getattr(err, "response", None), "status_code", None)
+        if status == 429 or type(err).__name__ in ("RateLimitError", "ModelRateLimitError"):
+            return True
+        text = str(err).lower()
+        if "rate limit" in text or "rate_limit" in text or "too many requests" in text:
+            return True
+    return False
+
+
+def retry_after_seconds(exc: BaseException) -> float | None:
+    """Server-suggested wait: ``Retry-After`` header or Groq's "try again in 7.5s"."""
+    for err in _exception_chain(exc):
+        headers = getattr(getattr(err, "response", None), "headers", None)
+        if headers is not None:
+            try:
+                value = headers.get("retry-after")
+                if value is not None:
+                    return float(value)
+            except (TypeError, ValueError):
+                pass
+        match = _RETRY_IN_RE.search(str(err))
+        if match:
+            return int(match.group(1) or 0) * 60 + float(match.group(2))
+    return None
+
+
+def retry_delay(exc: BaseException, attempt: int) -> int:
+    """Whole seconds to wait before retry number *attempt* (1-based)."""
+    if is_rate_limit_error(exc):
+        delay = retry_after_seconds(exc) or 2.0 ** attempt
+    else:
+        delay = 1.0
+    return max(1, min(math.ceil(delay), settings.llm_retry_max_delay))
+
+
+def retry_status_message(exc: BaseException, delay: int) -> str:
+    if is_rate_limit_error(exc):
+        return f"Rate limit reached — retrying in {delay}s…"
+    return f"Temporary error — retrying in {delay}s…"
 
 
 # Regex to strip agno tool-call metadata lines from agent responses
@@ -111,6 +205,29 @@ def _strip_tool_metadata_streaming(text: str) -> str:
 
 # ── Agent factory ────────────────────────────────────────────────────
 
+_http_client: httpx.Client | None = None
+_http_client_lock = threading.Lock()
+
+
+def _groq_http_client() -> httpx.Client:
+    """Process-wide HTTP client for Groq (keeps connections warm between turns).
+
+    Passing our own client also avoids noisy ``SyncHttpxClientWrapper``
+    ``'_state'`` AttributeErrors: agno's memory deep-copies the model on every
+    Agent, and the Groq SDK's *default* wrapper client has a ``__del__`` that
+    breaks on half-copied instances.  A plain ``httpx.Client`` has none.
+    """
+    global _http_client
+    with _http_client_lock:
+        if _http_client is None or _http_client.is_closed:
+            _http_client = httpx.Client(
+                timeout=httpx.Timeout(60.0, connect=10.0),
+                limits=httpx.Limits(max_connections=50, max_keepalive_connections=10),
+                follow_redirects=True,
+            )
+        return _http_client
+
+
 def _build_groq_model(model_id: str, api_key: str | None) -> Groq:
     resolved_key: str | None = api_key or get_groq_api_key()
     if not resolved_key:
@@ -118,7 +235,14 @@ def _build_groq_model(model_id: str, api_key: str | None) -> Groq:
             "GROQ_API_KEY is not set. Copy .env.example to .env and add your key, "
             "or set LLM_PROVIDER=ollama to use a local model."
         )
-    return Groq(id=model_id, api_key=resolved_key)
+    # max_retries=0: the SDK would otherwise retry 429s silently (with its own
+    # back-off); FinancialAgentService retries instead and reports progress.
+    return Groq(
+        id=model_id,
+        api_key=resolved_key,
+        max_retries=0,
+        http_client=_groq_http_client(),
+    )
 
 
 def _build_ollama_model(model_id: str, host: str | None = None) -> "Any":
@@ -153,7 +277,7 @@ def _resolve_model(
     key is available; otherwise the original error is raised.
     """
     if provider == "ollama":
-        ollama_model_id = model_id if model_id != DEFAULT_MODEL_ID else settings.ollama_model
+        ollama_model_id = model_id if model_id != get_groq_model() else settings.ollama_model
         try:
             t0 = time.monotonic()
             model = _build_ollama_model(ollama_model_id, settings.ollama_host)
@@ -167,10 +291,8 @@ def _resolve_model(
         except RuntimeError as exc:
             if not (api_key or get_groq_api_key()):
                 raise AgentNotConfiguredError(str(exc)) from exc
-            logger.warning(
-                "[LLM] %s — falling back to Groq model=%s", exc, DEFAULT_MODEL_ID
-            )
-            model_id = DEFAULT_MODEL_ID
+            model_id = get_groq_model()
+            logger.warning("[LLM] %s — falling back to Groq model=%s", exc, model_id)
 
     model = _build_groq_model(model_id, api_key)
     logger.info("[LLM] Using Groq model=%s", model_id)
@@ -179,7 +301,7 @@ def _resolve_model(
 
 def create_agent(
     *,
-    model_id: str = DEFAULT_MODEL_ID,
+    model_id: str | None = None,
     api_key: str | None = None,
     tools: Sequence[Toolkit] | None = None,
     instructions: list[str] | None = None,
@@ -192,8 +314,9 @@ def create_agent(
     Parameters
     ----------
     model_id:
-        Model identifier (Groq default: ``DEFAULT_MODEL_ID``; when the
-        provider is Ollama the default becomes ``OLLAMA_MODEL``).
+        Model identifier (default: ``GROQ_MODEL`` env-var, else
+        ``DEFAULT_MODEL_ID``; when the provider is Ollama the default becomes
+        ``OLLAMA_MODEL``).
     api_key:
         Groq API key.  Falls back to the ``GROQ_API_KEY`` env-var.
     tools:
@@ -216,7 +339,11 @@ def create_agent(
     """
     if model is None:
         resolved_provider = (provider or get_llm_provider()).lower().strip()
-        model = _resolve_model(provider=resolved_provider, model_id=model_id, api_key=api_key)
+        model = _resolve_model(
+            provider=resolved_provider,
+            model_id=get_groq_model() if model_id is None else model_id,
+            api_key=api_key,
+        )
 
     return Agent(
         model=model,
@@ -226,6 +353,10 @@ def create_agent(
         markdown=True,
         add_history_to_messages=False,
         session_id=session_id,
+        # Each tool round is another full model call: cap them, and keep tool
+        # results compact (and cached) via the hook.
+        tool_call_limit=settings.agent_tool_call_limit,
+        tool_hooks=[compact_tool_output],
     )
 
 
@@ -250,11 +381,14 @@ class FinancialAgentService:
         self,
         agent: Agent | None = None,
         *,
-        max_retries: int = _DEFAULT_MAX_RETRIES,
+        max_retries: int | None = None,
     ) -> None:
         self._injected: bool = agent is not None
         self._agent: Agent | None = agent
-        self._max_retries: int = max_retries
+        # Retries after the first attempt; total attempts = max_retries + 1.
+        self._max_retries: int = max(
+            0, _DEFAULT_MAX_RETRIES if max_retries is None else max_retries
+        )
         self.init_error: str | None = None
 
     # -- Expose underlying agent for consumers that need it ------------
@@ -307,18 +441,22 @@ class FinancialAgentService:
     def run(self, prompt: str, session_id: str | None = None) -> str:
         """Execute the agent and return the full response text.
 
-        Retries up to ``max_retries`` times on transient failures.
+        Retries up to ``max_retries`` times (rate limits wait for Groq's
+        ``Retry-After``; other errors wait 1s).
 
         Raises
         ------
         AgentNotConfiguredError
             If no LLM provider is configured (not retried).
+        LLMRateLimitError
+            If the last attempt failed on a rate limit.
         RuntimeError
-            If all retry attempts are exhausted.
+            If all retry attempts are exhausted for another reason.
         """
         agent = self._agent_for(session_id)
+        attempts = self._max_retries + 1
         last_error: Exception | None = None
-        for attempt in range(1, self._max_retries + 1):
+        for attempt in range(1, attempts + 1):
             try:
                 t0 = time.monotonic()
                 result = agent.run(prompt, **self._run_kwargs(False, session_id))
@@ -335,27 +473,38 @@ class FinancialAgentService:
                     elapsed_ms,
                 )
                 return content
+            except AgentNotConfiguredError:
+                raise
             except Exception as exc:
                 last_error = exc
                 logger.warning(
                     "Agent attempt %d/%d failed: %s",
                     attempt,
-                    self._max_retries,
+                    attempts,
                     str(exc)[:200],
                     exc_info=logger.isEnabledFor(logging.DEBUG),
                 )
-        raise RuntimeError(
-            f"Agent failed after {self._max_retries} attempts"
-        ) from last_error
+                if attempt < attempts:
+                    _sleep(retry_delay(exc, attempt))
+        if last_error is not None and is_rate_limit_error(last_error):
+            raise LLMRateLimitError(RATE_LIMIT_ERROR_MESSAGE) from last_error
+        raise RuntimeError(f"Agent failed after {attempts} attempts") from last_error
 
     # -- Streaming execution -------------------------------------------
 
     def stream(self, prompt: str, session_id: str | None = None) -> Generator[str, None, None]:
         """Execute the agent in streaming mode, yielding text chunks.
 
-        Unlike :meth:`run`, streaming does **not** retry — if the
-        underlying stream errors mid-flight, an ``"[ERROR]"`` sentinel
-        chunk is yielded and the generator ends.
+        Besides answer text, two kinds of sentinel chunks may be yielded:
+
+        * ``"[STATUS] <message>"`` – a failure happened *before* any text was
+          produced and the call will be retried after the stated wait
+          (at most ``max_retries`` times).
+        * ``"[ERROR] <message>"`` – generation failed for good; the message is
+          safe to show to users.  Always the last chunk.
+
+        Failures after partial output are not retried (that would duplicate
+        text); they end with ``[ERROR]``.
 
         Raises
         ------
@@ -363,26 +512,30 @@ class FinancialAgentService:
             Before the first chunk, if no LLM provider is configured.
         """
         agent = self._agent_for(session_id)
-        t0 = time.monotonic()
-        first_chunk = True
-        raw_buffer = ""
-        emitted_clean = ""
-        try:
-            run_stream = agent.run(prompt, **self._run_kwargs(True, session_id))
-            for chunk in run_stream:
-                text: str = ""
-                if hasattr(chunk, "content") and chunk.content:
-                    text = chunk.content
-                elif isinstance(chunk, str):
-                    text = chunk
-                if text:
-                    if first_chunk:
+        attempts = self._max_retries + 1
+        emitted_any = False
+        for attempt in range(1, attempts + 1):
+            t0 = time.monotonic()
+            raw_buffer = ""
+            emitted_clean = ""
+            try:
+                for chunk in agent.run(prompt, **self._run_kwargs(True, session_id)):
+                    if getattr(chunk, "event", None) == "RunError":
+                        raise RuntimeError(getattr(chunk, "content", None) or "agent run error")
+                    text: str = ""
+                    if hasattr(chunk, "content") and chunk.content:
+                        text = chunk.content
+                    elif isinstance(chunk, str):
+                        text = chunk
+                    if not text:
+                        continue
+                    if not raw_buffer:
                         logger.info(
-                            "[LLM latency] provider=%s TTFT=%.1fms (stream)",
+                            "[LLM latency] provider=%s attempt=%d TTFT=%.1fms (stream)",
                             type(agent.model).__name__,
+                            attempt,
                             (time.monotonic() - t0) * 1000,
                         )
-                        first_chunk = False
                     raw_buffer += text
                     cleaned = _strip_tool_metadata_streaming(raw_buffer)
                     if cleaned.startswith(emitted_clean):
@@ -391,10 +544,26 @@ class FinancialAgentService:
                         delta = cleaned
                     if delta:
                         emitted_clean = cleaned
+                        emitted_any = True
                         yield delta
-        except Exception:
-            logger.exception("Stream error")
-            yield "[ERROR] An error occurred while generating the response."
+                return
+            except Exception as exc:
+                rate_limited = is_rate_limit_error(exc)
+                if emitted_any or attempt >= attempts:
+                    logger.exception("Stream error (attempt %d/%d)", attempt, attempts)
+                    message = RATE_LIMIT_ERROR_MESSAGE if rate_limited else GENERIC_ERROR_MESSAGE
+                    yield f"{ERROR_PREFIX} {message}"
+                    return
+                delay = retry_delay(exc, attempt)
+                logger.warning(
+                    "Stream attempt %d/%d failed (%s); retrying in %ds",
+                    attempt,
+                    attempts,
+                    str(exc)[:200],
+                    delay,
+                )
+                yield f"{STATUS_PREFIX} {retry_status_message(exc, delay)}"
+                _sleep(delay)
 
 
 def llm_status() -> dict[str, Any]:

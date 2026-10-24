@@ -8,10 +8,15 @@ Re-exports the public API so consumers can do::
 package imports cleanly without an LLM API key.
 """
 
+import os
 from typing import Any
 
-from backend.app.agent import financial_agent as _impl
-from backend.app.agent.financial_agent import (  # noqa: F401
+# Opt out of agno telemetry before agno is first imported (AGNO_TELEMETRY=true
+# in the environment still opts back in).
+os.environ.setdefault("AGNO_TELEMETRY", "false")
+
+from backend.app.agent import financial_agent as _impl  # noqa: E402
+from backend.app.agent.financial_agent import (  # noqa: E402, F401
     AGENT_INSTRUCTIONS,
     DEFAULT_MODEL_ID,
     AgentNotConfiguredError,
@@ -22,8 +27,8 @@ from backend.app.agent.financial_agent import (  # noqa: F401
     llm_status,
     main,
 )
-from backend.app.agent.prompts import BEHAVIOURAL_RULES, TOOL_CATALOGUE  # noqa: F401
-from backend.app.agent.tool_registry import TOOL_FACTORIES, build_tools  # noqa: F401
+from backend.app.agent.prompts import BEHAVIOURAL_RULES, TOOL_CATALOGUE  # noqa: E402, F401
+from backend.app.agent.tool_registry import TOOL_FACTORIES, build_tools  # noqa: E402, F401
 
 __all__ = [  # noqa: F822
     "FinancialAgentService",

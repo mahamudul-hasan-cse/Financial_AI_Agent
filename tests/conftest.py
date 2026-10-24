@@ -18,6 +18,7 @@ _TEST_DB_DIR = tempfile.mkdtemp(prefix="financial-agent-tests-")
 os.environ["DATABASE_PATH"] = os.path.join(_TEST_DB_DIR, "test.db")
 os.environ.pop("SQLITE_PATH", None)
 os.environ.pop("GROQ_API_KEY", None)
+os.environ.pop("GROQ_MODEL", None)
 os.environ["LLM_PROVIDER"] = "groq"
 
 import pytest  # noqa: E402
@@ -34,12 +35,13 @@ def pytest_sessionfinish(session, exitstatus):
 @pytest.fixture(autouse=True)
 def _clear_sessions():
     """Reset in-memory session, rate-limit, and stats stores between tests."""
-    from api import _ip_rate_limits, _rate_limits, _stats, sessions
+    from api import _client_rate_limits, _ip_rate_limits, _rate_limits, _stats, sessions
     from persistence import reset_for_tests
 
     sessions.clear()
     _rate_limits.clear()
     _ip_rate_limits.clear()
+    _client_rate_limits.clear()
     reset_for_tests()
     _stats["total_messages"] = 0
     _stats["total_sessions_created"] = 0
@@ -50,6 +52,7 @@ def _clear_sessions():
     sessions.clear()
     _rate_limits.clear()
     _ip_rate_limits.clear()
+    _client_rate_limits.clear()
     reset_for_tests()
 
 
@@ -63,6 +66,13 @@ def _no_network_headlines():
         "research_service.get_market_context", side_effect=ConnectionError("offline in tests")
     ):
         yield
+
+
+@pytest.fixture(autouse=True)
+def _no_retry_sleep():
+    """LLM retry back-off never really sleeps in tests."""
+    with patch("backend.app.agent.financial_agent._sleep") as fake_sleep:
+        yield fake_sleep
 
 
 @pytest.fixture()

@@ -214,13 +214,28 @@ class TestStreamingContract:
         assert final == stored
         assert final.startswith("price is up")
 
-    def test_retry_before_output_does_not_duplicate(self, client, mock_agent):
-        mock_agent.stream.side_effect = [iter(["[ERROR] boom"]), iter(["Recovered"])]
+    def test_status_events_are_forwarded_as_json(self, client, mock_agent):
+        mock_agent.stream.return_value = iter(
+            ["[STATUS] Rate limit reached — retrying in 2s…", "Recovered"]
+        )
         events = _sse_events(client.post("/api/chat/stream", json={"message": "hi"}).text)
+        status = [e for e in events if e.startswith("[STATUS]")]
+        assert [json.loads(e[len("[STATUS]"):]) for e in status] == [
+            {"type": "status", "message": "Rate limit reached — retrying in 2s…"}
+        ]
         chunks = [json.loads(e) for e in events if e.startswith('"')]
         assert chunks == ["Recovered"]
         assert not any(e.startswith("[ERROR]") for e in events)
-        assert mock_agent.stream.call_count == 2
+        assert any(e.startswith("[FINAL]") for e in events)
+
+    def test_service_error_message_is_forwarded(self, client, mock_agent):
+        mock_agent.stream.return_value = iter(
+            ["[STATUS] retrying in 1s…", "[ERROR] The AI service is busy (rate limit reached)."]
+        )
+        events = _sse_events(client.post("/api/chat/stream", json={"message": "hi"}).text)
+        assert "[ERROR] The AI service is busy (rate limit reached)." in events
+        assert not any(e.startswith("[FINAL]") for e in events)
+        assert events[-1] == "[DONE]"
 
     def test_no_retry_after_partial_output(self, client, mock_agent):
         mock_agent.stream.side_effect = [iter(["Partial ", "[ERROR] boom"]), iter(["dup"])]

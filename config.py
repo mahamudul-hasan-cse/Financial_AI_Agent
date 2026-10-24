@@ -16,9 +16,17 @@ from dotenv import load_dotenv
 
 load_dotenv(override=False)
 
+# agno phones home with usage telemetry unless told otherwise. Default it off
+# here (after .env is loaded, so an explicit AGNO_TELEMETRY=true still wins);
+# backend.app.agent and tools/ repeat this before their own agno imports.
+os.environ.setdefault("AGNO_TELEMETRY", "false")
+
 APP_DIR = Path(__file__).resolve().parent
 
 DEFAULT_GROQ_MODEL = "openai/gpt-oss-120b"
+# Groq models this app is tuned for (GROQ_MODEL may name any Groq model).
+# gpt-oss-20b is the fastest; qwen3.8-27b sits between the two.
+KNOWN_GROQ_MODELS = ("openai/gpt-oss-20b", "openai/gpt-oss-120b", "qwen/qwen3.8-27b")
 DEFAULT_OLLAMA_MODEL = "qwen2.5:3b"
 DEFAULT_OLLAMA_HOST = "http://localhost:11434"
 DEFAULT_SPACY_MODEL = "en_core_web_sm"
@@ -31,6 +39,14 @@ def _env(name: str, default: str) -> str:
     return value.strip() if value and value.strip() else default
 
 
+def _env_int(name: str, default: int, minimum: int = 0) -> int:
+    """Integer env-var; falls back to *default* when unset or not a number."""
+    try:
+        return max(minimum, int(_env(name, str(default))))
+    except ValueError:
+        return default
+
+
 def get_llm_provider() -> str:
     """Return the configured LLM provider (``groq`` or ``ollama``).
 
@@ -38,6 +54,11 @@ def get_llm_provider() -> str:
     """
     provider = _env("LLM_PROVIDER", "groq").lower()
     return provider if provider in SUPPORTED_LLM_PROVIDERS else "groq"
+
+
+def get_groq_model() -> str:
+    """Return the Groq model id (``GROQ_MODEL``, default ``DEFAULT_GROQ_MODEL``)."""
+    return _env("GROQ_MODEL", DEFAULT_GROQ_MODEL)
 
 
 def get_groq_api_key() -> str | None:
@@ -58,6 +79,7 @@ class Settings:
     rate_limit_window: int
     rate_limit_max: int
     ip_rate_limit_max: int
+    rate_limit_per_minute: int
     session_ttl: int
     max_sessions: int
     llm_provider: str
@@ -70,6 +92,11 @@ class Settings:
     port: int
     forwarded_allow_ips: str
     log_level: str
+    llm_max_retries: int
+    llm_retry_max_delay: int
+    agent_tool_call_limit: int
+    tool_output_max_chars: int
+    cache_ttl_seconds: int
 
     @property
     def primary_llm_provider(self) -> str:
@@ -98,10 +125,11 @@ def load_settings() -> Settings:
         rate_limit_window=int(_env("RATE_LIMIT_WINDOW", "60")),
         rate_limit_max=int(_env("RATE_LIMIT_MAX", "10")),
         ip_rate_limit_max=int(_env("IP_RATE_LIMIT_MAX", "30")),
+        rate_limit_per_minute=_env_int("RATE_LIMIT_PER_MINUTE", 20),
         session_ttl=int(_env("SESSION_TTL", "1800")),
         max_sessions=int(_env("MAX_SESSIONS", "100")),
         llm_provider=get_llm_provider(),
-        groq_model=_env("GROQ_MODEL", DEFAULT_GROQ_MODEL),
+        groq_model=get_groq_model(),
         ollama_model=_env("OLLAMA_MODEL", DEFAULT_OLLAMA_MODEL),
         ollama_host=_env("OLLAMA_HOST", DEFAULT_OLLAMA_HOST).rstrip("/"),
         spacy_model=_env("SPACY_MODEL", DEFAULT_SPACY_MODEL),
@@ -110,6 +138,11 @@ def load_settings() -> Settings:
         port=int(_env("PORT", "8001")),
         forwarded_allow_ips=_env("FORWARDED_ALLOW_IPS", "127.0.0.1"),
         log_level=_env("LOG_LEVEL", "INFO").upper(),
+        llm_max_retries=_env_int("LLM_MAX_RETRIES", 2),
+        llm_retry_max_delay=_env_int("LLM_RETRY_MAX_DELAY", 20, minimum=1),
+        agent_tool_call_limit=_env_int("AGENT_TOOL_CALL_LIMIT", 3, minimum=1),
+        tool_output_max_chars=_env_int("TOOL_OUTPUT_MAX_CHARS", 2000, minimum=200),
+        cache_ttl_seconds=_env_int("CACHE_TTL_SECONDS", 60),
     )
 
 

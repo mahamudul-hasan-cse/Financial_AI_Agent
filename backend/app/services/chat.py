@@ -8,7 +8,14 @@ import time
 from typing import Any
 
 import cache
-from backend.app.agent.financial_agent import AgentNotConfiguredError, get_agent_service
+from backend.app.agent.financial_agent import (
+    ERROR_PREFIX,
+    GENERIC_ERROR_MESSAGE,
+    STATUS_PREFIX,
+    AgentNotConfiguredError,
+    LLMRateLimitError,
+    get_agent_service,
+)
 from backend.app.agent.prompts import get_intent_instruction
 from backend.app.state import _stats
 from nlp_pipeline import NLPMetadata, run_nlp_pipeline
@@ -18,6 +25,10 @@ logger = logging.getLogger("api.chat")
 
 __all__ = [
     "AgentNotConfiguredError",
+    "ERROR_PREFIX",
+    "GENERIC_ERROR_MESSAGE",
+    "LLMRateLimitError",
+    "STATUS_PREFIX",
     "agent",
     "append_disclaimer",
     "build_prompt",
@@ -68,12 +79,22 @@ def append_disclaimer(content: str) -> str:
     return content + disclaimer
 
 
+# Prompt context budget: the history is re-sent on every model round of a
+# turn, so keep only recent messages and clip long past answers.
+_CONTEXT_MESSAGES = 6
+_CONTEXT_MESSAGE_CHARS = 600
+_DISCLAIMER_RE = re.compile(r"\s*\*Data as of [^*]*not financial advice\.\*\s*$")
+
+
 def _build_context(history: list[dict[str, str]]) -> str:
-    """Build a conversation context string from the last 10 messages."""
+    """Build a compact conversation context from the last few messages."""
     lines: list[str] = []
-    for msg in history[-10:]:
+    for msg in history[-_CONTEXT_MESSAGES:]:
         role = "User" if msg["role"] == "user" else "Assistant"
-        lines.append(f"{role}: {msg['content']}")
+        content = _DISCLAIMER_RE.sub("", msg["content"])
+        if len(content) > _CONTEXT_MESSAGE_CHARS:
+            content = content[:_CONTEXT_MESSAGE_CHARS].rstrip() + " …"
+        lines.append(f"{role}: {content}")
     return "\n".join(lines)
 
 
