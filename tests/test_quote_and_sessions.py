@@ -132,3 +132,37 @@ class TestSidebarSessionActions:
     def test_list_is_scoped_to_client(self, client, other_client):
         client.post("/api/chat", json={"message": "mine"})
         assert other_client.get("/api/sessions").json()["sessions"] == []
+
+
+class TestCompanyNameQuote:
+    """Regression: company names must resolve to tickers on the real NLP path."""
+
+    def test_org_entity_with_ticker_yields_quote(self):
+        entity = SimpleNamespace(text="Apple", label="ORG", ticker="AAPL")
+        meta = SimpleNamespace(entities=[entity], intent="stock_price", intent_confidence=0.9)
+        with patch("research_service.get_market_context", return_value=_market()) as ctx:
+            data = build_structured_response("What is Apple stock price?", "Apple.", meta)
+        ctx.assert_called_once_with("AAPL")
+        assert data["quote"]["symbol"] == "AAPL"
+
+    def test_company_names_map_to_tickers(self):
+        from market_service import extract_symbols_from_entities
+        from nlp_pipeline import extract_entities
+
+        for text, symbol in [
+            ("What is Apple stock price?", "AAPL"),
+            ("How is Tesla doing today?", "TSLA"),
+            ("Show me Microsoft earnings", "MSFT"),
+        ]:
+            assert extract_symbols_from_entities(extract_entities(text)) == [symbol], text
+
+    def test_stream_quote_for_company_name_uses_real_nlp(self, client, mock_agent):
+        mock_agent.stream.return_value = iter(["Apple trades near $190."])
+        with patch("research_service.get_market_context", return_value=_market()) as ctx:
+            body = client.post(
+                "/api/chat/stream", json={"message": "What is Apple stock price?"}
+            ).text
+        ctx.assert_called_with("AAPL")
+        research = next(e for e in _sse_events(body) if e.startswith("[RESEARCH_DATA]"))
+        quote = json.loads(research[len("[RESEARCH_DATA]"):])["quote"]
+        assert quote is not None and quote["symbol"] == "AAPL"

@@ -46,16 +46,22 @@ def _fast_info_attr(fast_info: Any, name: str) -> Any:
 
 
 def extract_symbols_from_entities(entities: list[Any]) -> list[str]:
-    """Return deduplicated ticker symbols from NLP entities."""
+    """Return deduplicated ticker symbols from NLP entities.
+
+    Any entity carrying a ticker counts — bare symbols arrive as ``TICKER``,
+    company names ("Apple") arrive as ``ORG`` with the mapped ticker.
+    """
 
     seen: set[str] = set()
     result: list[str] = []
     for ent in entities:
         ticker = ent.ticker if hasattr(ent, "ticker") else ent.get("ticker")
-        label = ent.label if hasattr(ent, "label") else ent.get("label", "")
-        if label == "TICKER" and ticker and ticker not in seen:
-            seen.add(ticker)
-            result.append(str(ticker).upper())
+        if not ticker:
+            continue
+        symbol = str(ticker).upper()
+        if symbol not in seen:
+            seen.add(symbol)
+            result.append(symbol)
     return result
 
 

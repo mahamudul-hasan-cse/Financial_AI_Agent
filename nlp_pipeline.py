@@ -58,6 +58,16 @@ def _load_ticker_map() -> dict[str, str | None]:
 
 ORG_TO_TICKER: dict[str, str | None] = _load_ticker_map()
 
+# Longest names first so "bank of america" wins over any shorter overlap.
+_COMPANY_NAME_PATTERN: re.Pattern[str] | None = (
+    re.compile(
+        r"\b(?:" + "|".join(re.escape(n) for n in sorted(ORG_TO_TICKER, key=len, reverse=True)) + r")\b",
+        re.IGNORECASE,
+    )
+    if ORG_TO_TICKER
+    else None
+)
+
 # ── Intent keyword patterns ──────────────────────────────────────────────────
 _INTENT_PATTERNS: dict[str, list[str]] = {
     "stock_price": [
@@ -199,6 +209,18 @@ def extract_entities(text: str) -> list[dict]:
             if ticker is None and re.match(r'^[A-Z]{1,5}$', ent.text) and ent.text not in _TICKER_STOPWORDS:
                 ticker = ent.text
             entities.append({"text": ent.text, "label": ent.label_, "ticker": ticker})
+
+    # Company-name lookup pass — maps known names ("Apple", "Tesla") to tickers
+    # even when spaCy is unavailable or misses/mislabels the name.
+    mapped = {e["ticker"] for e in entities if e["ticker"]}
+    for match in _COMPANY_NAME_PATTERN.finditer(text) if _COMPANY_NAME_PATTERN else ():
+        key = match.group(0).lower()
+        ticker = ORG_TO_TICKER.get(key)
+        if not ticker or ticker in mapped or key in seen_spacy:
+            continue
+        mapped.add(ticker)
+        seen_spacy.add(key)
+        entities.append({"text": match.group(0), "label": "ORG", "ticker": ticker})
 
     # Financial metric patterns (FIN_METRIC) — independent of spaCy seen set
     for match in _FIN_METRIC_PATTERN.finditer(text):

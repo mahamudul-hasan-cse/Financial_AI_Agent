@@ -122,7 +122,7 @@ def build_prompt(
 
 def _first_ticker(nlp_meta: NLPMetadataSchema) -> str | None:
     for ent in nlp_meta.entities:
-        if ent.label == "TICKER" and ent.ticker:
+        if ent.ticker:
             return ent.ticker
     return None
 
