@@ -1,147 +1,165 @@
-"""Simple in-memory TTL cache for stock data.
+"""Thread-safe in-memory TTL cache for market data and tool results.
 
-Caches yfinance responses (ticker info, history, fast_info) to avoid
-hammering the Yahoo Finance API with repeated identical requests.
+Caches yfinance responses (ticker info, history, news, recommendations) and
+agent tool outputs so repeated questions about the same ticker don't hammer
+Yahoo Finance or DuckDuckGo, and so one chat turn that needs both a price and
+fundamentals only fetches ``Ticker.info`` once.
 
 Design:
-  - Thread-safe via a simple dict + timestamp check (GIL protects reads/writes).
-  - Default TTL: 5 minutes — fresh enough for intraday use, avoids API rate limits.
-  - Falls back gracefully: if Redis or another backend is added later, this
-    module's interface stays the same.
-
-Academic relevance:
-  - Demonstrates caching as an optimization technique (memoization pattern).
-  - Shows TTL-based cache invalidation for time-sensitive financial data.
+  - One ``RLock`` guards the store; reads, writes and LRU eviction are atomic.
+  - :func:`get_or_set` is *single-flight*: concurrent callers asking for the
+    same missing key wait for one fetch instead of all hitting the network.
+  - Default TTL comes from ``CACHE_TTL_SECONDS`` (60s). ``0`` disables caching.
+  - Keys are ``"<function>:<TICKER>[:<args>]"`` — see :func:`make_key`.
 """
 
 from __future__ import annotations
 
+import threading
 import time
 from collections import OrderedDict
-from typing import Any
+from typing import TYPE_CHECKING, Any, Callable, TypeVar
 
-# Default time-to-live in seconds
-DEFAULT_TTL: int = 300  # 5 minutes
+from config import settings
+
+if TYPE_CHECKING:
+    import pandas as pd
+
+T = TypeVar("T")
+
+# Default time-to-live in seconds (CACHE_TTL_SECONDS); read at call time so
+# tests can patch it.
+DEFAULT_TTL: int = settings.cache_ttl_seconds
 
 # Maximum cache entries before LRU eviction kicks in
 MAX_CACHE_SIZE: int = 1000
 
-# Internal cache store: key -> (value, expiry_timestamp)
-# OrderedDict preserves insertion/access order for LRU eviction
+# Internal cache store: key -> (value, expiry_timestamp), in LRU order
 _cache: OrderedDict[str, tuple[Any, float]] = OrderedDict()
+_lock = threading.RLock()
+# Per-key locks for single-flight fetches in get_or_set()
+_key_locks: dict[str, threading.Lock] = {}
+
+_MISSING = object()
 
 
-def get(key: str) -> Any | None:
-    """Retrieve a cached value if it exists and hasn't expired.
+def make_key(function: str, symbol: str, *args: Any) -> str:
+    """Build a cache key from a function name, ticker and extra arguments."""
+    parts = [function, symbol.strip().upper(), *(str(a) for a in args)]
+    return ":".join(parts)
 
-    Args:
-        key: Cache key string.
 
-    Returns:
-        The cached value, or ``None`` if missing or expired.
-    """
+def _lookup(key: str) -> Any:
     entry = _cache.get(key)
     if entry is None:
-        return None
+        return _MISSING
     value, expiry = entry
-    if time.time() > expiry:
+    if time.monotonic() > expiry:
         _cache.pop(key, None)
-        return None
-    # Move to end on access (most-recently used)
+        return _MISSING
     _cache.move_to_end(key)
     return value
 
 
-def set(key: str, value: Any, ttl: int = DEFAULT_TTL) -> None:
-    """Store a value in the cache with a TTL.
+def get(key: str) -> Any | None:
+    """Return the cached value, or ``None`` if missing or expired."""
+    with _lock:
+        value = _lookup(key)
+    return None if value is _MISSING else value
 
-    Enforces MAX_CACHE_SIZE via LRU eviction: when the cache is full,
-    the oldest entry (least-recently inserted) is evicted first.
 
-    Args:
-        key: Cache key string.
-        value: Value to cache.
-        ttl: Time-to-live in seconds (default 300 = 5 minutes).
-    """
-    # If key already exists, remove it so it moves to the end (most recent)
-    if key in _cache:
+def set(key: str, value: Any, ttl: int | None = None) -> None:
+    """Store *value* for *ttl* seconds (default ``DEFAULT_TTL``; ``<= 0`` skips)."""
+    ttl = DEFAULT_TTL if ttl is None else ttl
+    if ttl <= 0:
+        return
+    with _lock:
+        _cache[key] = (value, time.monotonic() + ttl)
         _cache.move_to_end(key)
-    _cache[key] = (value, time.time() + ttl)
-    # Evict oldest entries if cache exceeds max size
-    while len(_cache) > MAX_CACHE_SIZE:
-        _cache.popitem(last=False)
+        while len(_cache) > MAX_CACHE_SIZE:
+            _cache.popitem(last=False)
+
+
+def get_or_set(key: str, factory: Callable[[], T], ttl: int | None = None) -> T:
+    """Return the cached value for *key*, computing it with *factory* on a miss.
+
+    Only one thread runs *factory* per key at a time; others wait and reuse
+    its result.  Exceptions from *factory* propagate and nothing is cached.
+    """
+    with _lock:
+        value = _lookup(key)
+        if value is not _MISSING:
+            return value
+        key_lock = _key_locks.setdefault(key, threading.Lock())
+
+    with key_lock:
+        with _lock:
+            value = _lookup(key)
+        if value is not _MISSING:
+            return value
+        try:
+            value = factory()
+            set(key, value, ttl)
+            return value
+        finally:
+            with _lock:
+                _key_locks.pop(key, None)
 
 
 def invalidate(key: str) -> None:
     """Remove a specific key from the cache."""
-    _cache.pop(key, None)
+    with _lock:
+        _cache.pop(key, None)
 
 
 def clear() -> None:
     """Clear the entire cache."""
-    _cache.clear()
+    with _lock:
+        _cache.clear()
 
 
 def stats() -> dict[str, int]:
     """Return basic cache statistics."""
-    now = time.time()
-    total = len(_cache)
-    alive = sum(1 for _, (_, exp) in _cache.items() if now <= exp)
+    now = time.monotonic()
+    with _lock:
+        total = len(_cache)
+        alive = sum(1 for _, exp in _cache.values() if now <= exp)
     return {"total_entries": total, "alive_entries": alive, "expired_entries": total - alive}
 
 
-def cached_ticker_info(symbol: str) -> dict:
-    """Fetch and cache yfinance Ticker.info for a symbol.
+# ── yfinance helpers ─────────────────────────────────────────────────
 
-    Returns cached data if available and fresh, otherwise fetches from
-    Yahoo Finance and caches the result for DEFAULT_TTL seconds.
-    """
+def _ticker(symbol: str) -> Any:
     import yfinance as yf
 
-    key = f"ticker_info:{symbol.upper()}"
-    cached = get(key)
-    if cached is not None:
-        return cached
+    return yf.Ticker(symbol.strip().upper())
 
-    ticker = yf.Ticker(symbol)
-    info = ticker.info
-    set(key, info)
-    return info
+
+def cached_ticker_info(symbol: str) -> dict:
+    """``yfinance.Ticker(symbol).info``, cached per ticker."""
+    return get_or_set(make_key("ticker_info", symbol), lambda: _ticker(symbol).info or {})
 
 
 def cached_ticker_history(symbol: str, period: str = "1mo") -> "pd.DataFrame":
-    """Fetch and cache yfinance Ticker.history() for a symbol + period.
-
-    Returns cached DataFrame if available and fresh, otherwise fetches
-    from Yahoo Finance and caches the result for DEFAULT_TTL seconds.
-    """
-    import yfinance as yf
-
-    key = f"ticker_history:{symbol.upper()}:{period}"
-    cached = get(key)
-    if cached is not None:
-        return cached
-
-    ticker = yf.Ticker(symbol)
-    hist = ticker.history(period=period)
-    set(key, hist)
-    return hist
+    """``yfinance.Ticker(symbol).history(period)``, cached per ticker + period."""
+    return get_or_set(
+        make_key("ticker_history", symbol, period),
+        lambda: _ticker(symbol).history(period=period),
+    )
 
 
 def cached_fast_info(symbol: str) -> Any:
-    """Fetch and cache yfinance Ticker.fast_info for a symbol.
+    """``yfinance.Ticker(symbol).fast_info``, cached per ticker."""
+    return get_or_set(make_key("fast_info", symbol), lambda: _ticker(symbol).fast_info)
 
-    Returns cached data if available and fresh, otherwise fetches
-    from Yahoo Finance and caches the result for DEFAULT_TTL seconds.
-    """
-    import yfinance as yf
 
-    key = f"fast_info:{symbol.upper()}"
-    cached = get(key)
-    if cached is not None:
-        return cached
+def cached_ticker_news(symbol: str) -> list[dict[str, Any]]:
+    """``yfinance.Ticker(symbol).news``, cached per ticker."""
+    return get_or_set(make_key("ticker_news", symbol), lambda: list(_ticker(symbol).news or []))
 
-    ticker = yf.Ticker(symbol)
-    info = ticker.fast_info
-    set(key, info)
-    return info
+
+def cached_recommendations(symbol: str) -> "pd.DataFrame | None":
+    """``yfinance.Ticker(symbol).recommendations``, cached per ticker."""
+    return get_or_set(
+        make_key("recommendations", symbol), lambda: _ticker(symbol).recommendations
+    )

@@ -51,13 +51,11 @@ def extract_symbols_from_entities(entities: list[Any]) -> list[str]:
 
 
 def get_recent_headlines(symbol: str, limit: int = 5) -> list[dict[str, Any]]:
-    """Fetch recent headlines from Yahoo Finance when available."""
-
-    import yfinance as yf
+    """Fetch recent headlines from Yahoo Finance (cached per ticker)."""
 
     headlines: list[dict[str, Any]] = []
     try:
-        for item in (yf.Ticker(symbol).news or [])[:limit]:
+        for item in cache.cached_ticker_news(symbol)[:limit]:
             title = item.get("title") or (item.get("content") or {}).get("title", "")
             url = item.get("link") or (item.get("content") or {}).get("canonicalUrl", {}).get("url")
             publisher = item.get("publisher") or (item.get("content") or {}).get("provider", {}).get("displayName")
