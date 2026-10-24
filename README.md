@@ -268,7 +268,8 @@ All settings are environment variables, read in `config.py`. `.env` is loaded wi
 | `OLLAMA_HOST` | `http://localhost:11434` | Ollama server URL |
 | `SPACY_MODEL` | `en_core_web_sm` | spaCy model for NER and lemmatisation (`python -m spacy download <name>`) |
 | `EMBEDDING_MODEL` | `all-MiniLM-L6-v2` | sentence-transformers model for RAG (`all-mpnet-base-v2` is a little better and uses about 5× the RAM) |
-| `DATABASE_PATH` | `data/financial_agent.db` | SQLite file (`SQLITE_PATH` is still accepted) |
+| `DATABASE_PATH` | `data/financial_agent.db` | SQLite file (`SQLITE_PATH` is still accepted). Ignored when `DATABASE_URL` is set |
+| `DATABASE_URL` | (unset) | **Secret.** `postgresql://…` URL to use PostgreSQL (e.g. Neon's pooled `-pooler` URL with `?sslmode=require`) instead of SQLite. Uses a small psycopg pool (`DB_POOL_MIN_SIZE`/`DB_POOL_MAX_SIZE`, default 1/5) with server-side prepared statements off, so PgBouncer/Neon pooling works |
 | `OUTPUTS_DIR` | `outputs/` | Where charts and Excel files are written |
 | `HOST` / `PORT` | `0.0.0.0` / `8001` | Bind address for `python api.py` and the Docker image |
 | `FORWARDED_ALLOW_IPS` | `127.0.0.1` | Proxies trusted for `X-Forwarded-For`. Set `*` behind a PaaS load balancer so rate limits see real client IPs |
@@ -285,7 +286,7 @@ Both are public: anything `VITE_*` ends up in the browser bundle, so never put s
 
 **OpenRouter (paid).** Defaults are paid models with tested tool calling: `openai/gpt-oss-120b` as primary (~$0.15/$0.60 per 1M input/output tokens) then `google/gemini-2.5-flash` as backup (~$0.30/$2.50). An answer costs roughly $0.001–0.003. Paid models have no daily request cap (rate limits scale with credits). Every tool round of an answer is a separate request. Avoid `:free` models: they are capped (50–1000/day) and often rate-limited upstream.
 
-**Secrets.** Only `GROQ_API_KEY`, `OPENROUTER_API_KEY` and `API_KEY` are secret. Keep them in `.env` (git-ignored
+**Secrets.** Only `GROQ_API_KEY`, `OPENROUTER_API_KEY`, `API_KEY` and `DATABASE_URL` are secret. Keep them in `.env` (git-ignored
 and excluded from the Docker build context) or in your platform's secret store, and pass
 them at runtime (`docker run --env-file .env`, compose `env_file`, PaaS dashboard). They are
 never baked into the image or exposed by `/api/health` (which only reports whether a key is
@@ -306,7 +307,17 @@ npm run lint && npm run build
 
 The backend tests use a temporary SQLite database. `tests/conftest.py` sets `DATABASE_PATH`
 before importing the app, and `persistence.reset_for_tests()` refuses to touch the default
-DB. The tests also remove `LLM_PROVIDER`, `GROQ_API_KEY` and the OpenRouter settings, mock the
+DB. They always run on SQLite (`DATABASE_URL` is cleared). To also check PostgreSQL,
+point `TEST_DATABASE_URL` at a disposable database:
+
+```bash
+docker run -d --name fa-pg -e POSTGRES_PASSWORD=test -e POSTGRES_DB=fa -p 55432:5432 postgres:17
+export TEST_DATABASE_URL=postgresql://postgres:test@localhost:55432/fa
+pytest -q tests/test_persistence_backends.py      # persistence contract on SQLite + Postgres
+TEST_BACKEND=postgres pytest -q                    # whole suite on Postgres
+```
+
+The tests also remove `LLM_PROVIDER`, `GROQ_API_KEY` and the OpenRouter settings, mock the
 LLM (including both fallback chains), and stub live market data.
 
 Coverage includes:
@@ -402,6 +413,27 @@ the session cache, rate limits and stats live in process memory.
   is tight, `EMBEDDING_MODEL` can point at any small sentence-transformers model. If it fails
   to load, RAG falls back to TF-IDF. The image is about 2 GB.
 
+### PostgreSQL (Neon)
+
+Set `DATABASE_URL` to the Neon **pooled** connection string and no disk is needed for data.
+Tables are created on startup. To copy an existing SQLite database (idempotent; ids and
+sequences are preserved):
+
+```bash
+DATABASE_URL='postgresql://…' python scripts/migrate_sqlite_to_postgres.py --sqlite data/financial_agent.db
+```
+
+### Vercel frontend (`frontend/vercel.json`)
+
+`frontend/vercel.json` proxies `/api/*` and `/outputs/*` to the backend, so the browser
+stays same-origin (no CORS setup, no `VITE_API_URL` needed), and serves `index.html` for
+other paths. Before deploying, replace `BACKEND_URL_PLACEHOLDER` in both rewrites with the
+backend host, e.g. `my-api.azurecontainerapps.io`. In the Vercel project set the root
+directory to `frontend` (framework Vite, build `npm run build`, output `dist`). Vercel's
+rewrite proxy forwards streaming (SSE) responses but enforces a proxy timeout, so very long
+answers can be cut off; if that happens, build with `VITE_API_URL`/`VITE_OUTPUTS_URL` pointing
+at the backend directly and add the Vercel origin to `CORS_ORIGINS`.
+
 No deploy manifests (`render.yaml`, `fly.toml`, Bicep) are included yet.
 
 ---
@@ -414,7 +446,7 @@ Financial_AI_Agent/
 ├── config.py                  # All environment settings
 ├── nlp_pipeline.py            # spaCy NER + regex entities + VADER + intent
 ├── intent_classifier.py       # TF-IDF + LogisticRegression (8 intents)
-├── persistence.py             # SQLite: sessions (with client_id), messages, watchlist, alerts
+├── persistence.py             # SQLite or Postgres: sessions (with client_id), messages, watchlist, alerts
 ├── cache.py                   # thread-safe TTL + LRU cache (yfinance data, tool results)
 ├── market_service.py          # Snapshot / comparison / watchlist data
 ├── research_service.py        # Structured research card builder
