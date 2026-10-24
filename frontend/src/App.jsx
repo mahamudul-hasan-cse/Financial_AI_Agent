@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { MessageErrorBoundary } from './ErrorBoundary.jsx'
 import ResearchCard from './ResearchCard.jsx'
+import { preloadMarkdown } from './lazyMarkdown.js'
 import NLPPanel from './NLPPanel.jsx'
 import StockChart from './StockChart.jsx'
 import { useToast } from './useToast.jsx'
@@ -25,6 +26,23 @@ const STARTER_PROMPTS = [
 
 function formatTime(ts) {
   return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+}
+
+// Text to put on the clipboard: the answer without standalone chart-file lines.
+function copyableText(content) {
+  return (content || '')
+    .split('\n')
+    .filter(line => !/^[a-zA-Z0-9_.-]+\.png\s*$/.test(line.trim()))
+    .join('\n')
+    .trim()
+}
+
+// The user question an agent message (at index idx) answered.
+function questionFor(messages, idx) {
+  for (let i = idx - 1; i >= 0; i--) {
+    if (messages[i].role === 'user') return messages[i].content
+  }
+  return null
 }
 
 function getSpeechRecognitionConstructor() {
@@ -69,7 +87,7 @@ export default function App() {
   const voiceSupported   = !!getSpeechRecognitionConstructor()
   const { addToast, ToastContainer } = useToast()
 
-  useEffect(() => { loadSavedSessions() }, [])
+  useEffect(() => { loadSavedSessions(); preloadMarkdown() }, [])
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, loading])
@@ -186,9 +204,9 @@ export default function App() {
     abortRef.current = controller
 
     // One request per question: no automatic fallback to /api/chat, which
-    // would run the LLM a second time (the server already retries a failed
-    // generation once if nothing was streamed yet).
-    const state = { text: '', final: null, error: null, nlpMeta: null, structured: null }
+    // would run the LLM a second time (the server already retries failed
+    // generations, announcing each retry with a status event).
+    const state = { text: '', final: null, error: null, status: null, nlpMeta: null, structured: null }
     const render = (fallbackText = '') => {
       // The user switched/cleared the conversation: don't write into it.
       if (controller.signal.reason === 'switch') return
@@ -198,6 +216,8 @@ export default function App() {
         updated[updated.length - 1] = {
           role: 'agent',
           content: state.final ?? (state.text || fallbackText),
+          // Retry notices ("Retrying in 4s…") only matter until text arrives.
+          status: state.text || state.final != null ? null : state.status,
           timestamp: agentTs,
           nlpMeta: state.nlpMeta,
           structuredResponse: state.structured,
@@ -216,7 +236,8 @@ export default function App() {
         const payload = await res.json().catch(() => ({}))
         const retryAfter = res.headers.get('Retry-After')
         const detail = payload.detail || `Request failed (${res.status})`
-        throw new Error(res.status === 429 && retryAfter ? `${detail} Try again in ${retryAfter}s.` : detail)
+        const hint = retryAfter && !/try again/i.test(detail) ? ` Try again in ${retryAfter}s.` : ''
+        throw new Error(res.status === 429 || res.status === 503 ? `${detail}${hint}` : detail)
       }
 
       const reader  = res.body.getReader()
@@ -234,6 +255,11 @@ export default function App() {
           else if (event.type === 'research') state.structured = event.value
           else if (event.type === 'final') state.final = event.value
           else if (event.type === 'error') state.error = event.value || 'Generation failed.'
+          else if (event.type === 'status') {
+            state.status = event.value
+            resetStageTimer()
+            setLoadingStage(event.value)
+          }
           else if (event.type === 'text') state.text += event.value
           else continue
           render()
@@ -242,6 +268,7 @@ export default function App() {
       }
       if (finished) reader.cancel().catch(() => {})
 
+      state.status = null
       if (state.error && !state.text) {
         state.final = `Error: ${state.error}`
         addToast(state.error, 'error')
@@ -251,6 +278,7 @@ export default function App() {
       render('No response received. Please try again.')
       loadSavedSessions(sessionId)
     } catch (err) {
+      state.status = null
       if (controller.signal.aborted) {
         render('Stopped.')
         return
@@ -269,6 +297,21 @@ export default function App() {
 
   function handleStop() {
     abortRef.current?.abort()
+  }
+
+  async function handleCopy(content) {
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error('clipboard unavailable')
+      await navigator.clipboard.writeText(copyableText(content))
+      addToast('Copied to clipboard', 'success')
+    } catch {
+      addToast('Could not copy — select the text and copy it manually.', 'error')
+    }
+  }
+
+  function handleRegenerate(idx) {
+    const question = questionFor(messages, idx)
+    if (question) sendMessage(question)
   }
 
   const canSend   = input.trim().length > 0 && !loading
@@ -363,6 +406,7 @@ export default function App() {
             ) : (
               messages.map((message, idx) => {
                 const msgId = `${message.timestamp}-${idx}`
+                const isStreaming = loading && idx === messages.length - 1
                 return (
                   <div className={`message-row ${message.role}`} key={msgId}>
                     {message.role === 'agent' && (
@@ -381,6 +425,10 @@ export default function App() {
                             <NLPPanel meta={message.nlpMeta} />
                           )}
 
+                          {message.status && !message.content && (
+                            <div className="message-status" role="status">{message.status}</div>
+                          )}
+
                           {message.content && (
                             <div className="message-chart">
                               <StockChart content={message.content} />
@@ -389,6 +437,27 @@ export default function App() {
 
                           <div className="message-footer">
                             <span className="message-time">{formatTime(message.timestamp)}</span>
+                            {message.content && !isStreaming && (
+                              <div className="message-actions">
+                                <button
+                                  type="button"
+                                  className="message-action-btn"
+                                  onClick={() => handleCopy(message.content)}
+                                  aria-label="Copy response"
+                                  title="Copy response"
+                                >⧉ Copy</button>
+                                {questionFor(messages, idx) && (
+                                  <button
+                                    type="button"
+                                    className="message-action-btn"
+                                    onClick={() => handleRegenerate(idx)}
+                                    disabled={loading}
+                                    aria-label="Regenerate response"
+                                    title="Ask the previous question again"
+                                  >↻ Regenerate</button>
+                                )}
+                              </div>
+                            )}
                           </div>
                         </div>
                       ) : (

@@ -32,6 +32,11 @@ const tableWithClose = `
 `
 
 describe('StockChart', () => {
+  it('shows a placeholder while the chart chunk loads, without recharts in the main module', () => {
+    const { container } = render(<StockChart content={markdownTable} />)
+    expect(container.querySelector('.stock-chart-placeholder')).toBeInTheDocument()
+  })
+
   it('renders null when content is null', () => {
     const { container } = render(<StockChart content={null} />)
     expect(container.innerHTML).toBe('')
@@ -47,15 +52,15 @@ describe('StockChart', () => {
     expect(container.innerHTML).toBe('')
   })
 
-  it('renders a chart when content has a valid markdown table', () => {
-    const { getByTestId } = render(<StockChart content={markdownTable} />)
-    expect(getByTestId('line-chart')).toBeInTheDocument()
+  it('renders a chart when content has a valid markdown table', async () => {
+    const { findByTestId, getByTestId } = render(<StockChart content={markdownTable} />)
+    expect(await findByTestId('line-chart')).toBeInTheDocument()
     expect(getByTestId('line-chart').dataset.length).toBe('4')
   })
 
-  it('parses Close column as price', () => {
-    const { getByTestId } = render(<StockChart content={tableWithClose} />)
-    expect(getByTestId('line-chart')).toBeInTheDocument()
+  it('parses Close column as price', async () => {
+    const { findByTestId, getByTestId } = render(<StockChart content={tableWithClose} />)
+    expect(await findByTestId('line-chart')).toBeInTheDocument()
     expect(getByTestId('line-chart').dataset.length).toBe('2')
   })
 
@@ -80,15 +85,15 @@ describe('StockChart', () => {
     expect(container.innerHTML).toBe('')
   })
 
-  it('handles dollar signs and formatting in price values', () => {
+  it('handles dollar signs and formatting in price values', async () => {
     const content = `
 | Date | Price |
 |------|-------|
 | 2024-01-01 | $1,250.00 |
 | 2024-01-02 | $1,255.50 |
 `
-    const { getByTestId } = render(<StockChart content={content} />)
-    expect(getByTestId('line-chart')).toBeInTheDocument()
+    const { findByTestId } = render(<StockChart content={content} />)
+    expect(await findByTestId('line-chart')).toBeInTheDocument()
   })
 
   it('renders null for malformed table (no separator)', () => {
@@ -104,9 +109,9 @@ describe('StockChart', () => {
     // Behavior depends on implementation
   })
 
-  it('renders all chart sub-components', () => {
-    const { getByTestId } = render(<StockChart content={markdownTable} />)
-    expect(getByTestId('responsive-container')).toBeInTheDocument()
+  it('renders all chart sub-components', async () => {
+    const { findByTestId, getByTestId } = render(<StockChart content={markdownTable} />)
+    expect(await findByTestId('responsive-container')).toBeInTheDocument()
     expect(getByTestId('grid')).toBeInTheDocument()
     expect(getByTestId('x-axis')).toBeInTheDocument()
     expect(getByTestId('y-axis')).toBeInTheDocument()

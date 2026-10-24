@@ -88,6 +88,13 @@ export function interpretEvent(data) {
       catch { return { type: 'ignored' } }
     }
   }
+  if (data.startsWith('[STATUS]')) {
+    // {"type":"status","message":"Rate limit reached — retrying in 4s…"}
+    try {
+      const payload = JSON.parse(data.slice(8))
+      return { type: 'status', value: String(payload?.message || '') }
+    } catch { return { type: 'ignored' } }
+  }
   if (data.startsWith('[ERROR]')) return { type: 'error', value: data.slice(7).trim() }
   try {
     const value = JSON.parse(data)

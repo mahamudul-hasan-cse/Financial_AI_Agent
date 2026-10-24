@@ -37,6 +37,12 @@ describe('interpretEvent', () => {
     expect(interpretEvent('"line\\nbreak"')).toEqual({ type: 'text', value: 'line\nbreak' })
   })
 
+  it('parses retry status events', () => {
+    expect(interpretEvent('[STATUS]{"type":"status","message":"Retrying in 4s…"}'))
+      .toEqual({ type: 'status', value: 'Retrying in 4s…' })
+    expect(interpretEvent('[STATUS]{oops')).toEqual({ type: 'ignored' })
+  })
+
   it('never appends unparseable fragments as text', () => {
     expect(interpretEvent('"partial')).toEqual({ type: 'ignored' })
     expect(interpretEvent('[NLP_META]{broken')).toEqual({ type: 'ignored' })

@@ -1,5 +1,7 @@
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
+import { lazy, Suspense } from 'react'
+import { loadMarkdown } from './lazyMarkdown.js'
+
+const Markdown = lazy(loadMarkdown)
 
 const PNG_LINE_RE = /^[a-zA-Z0-9_.-]+\.png\s*$/
 // Base URL for generated files; override when the API is on another origin.
@@ -34,7 +36,10 @@ function ResearchCard({ content, data }) {
     <div className="research-card" aria-label="Assistant response">
       {displayText && (
         <div className="assistant-answer">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{displayText}</ReactMarkdown>
+          {/* Plain text until the markdown chunk has loaded. */}
+          <Suspense fallback={<p className="markdown-fallback">{displayText}</p>}>
+            <Markdown>{displayText}</Markdown>
+          </Suspense>
         </div>
       )}
 
