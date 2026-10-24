@@ -77,7 +77,7 @@ describe('App streaming', () => {
         'data: [STATUS]{"type":"status","message":"Groq busy — switched to backup model"}\n\n',
         'data: "Backup answer"\n\n',
         'data: [FINAL]"Backup answer"\n\n',
-        'data: [MODEL_INFO]{"provider":"openrouter","model":"google/gemma-4-26b-a4b-it:free","fallback":true}\n\n',
+        'data: [MODEL_INFO]{"provider":"openrouter","model":"google/gemini-2.5-flash","fallback":true}\n\n',
         'data: [DONE]\n\n',
       ])
     })
@@ -86,6 +86,6 @@ describe('App streaming', () => {
     fireEvent.click(screen.getByLabelText('Send'))
 
     await waitFor(() => expect(screen.getByText('Backup answer')).toBeInTheDocument())
-    expect(screen.getByText(/via backup · google\/gemma-4-26b-a4b-it:free/)).toBeInTheDocument()
+    expect(screen.getByText(/via backup · google\/gemini-2.5-flash/)).toBeInTheDocument()
   })
 })

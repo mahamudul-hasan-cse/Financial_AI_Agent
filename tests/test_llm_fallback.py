@@ -20,8 +20,8 @@ from fastapi.testclient import TestClient
 from tests.conftest import TEST_CLIENT_ID
 
 PRIMARY_MODEL = "openai/gpt-oss-120b"
-BACKUP_1 = "nvidia/nemotron-3.5-super-vl:free"
-BACKUP_2 = "google/gemma-4-26b-a4b-it:free"
+BACKUP_1 = "openai/gpt-oss-120b"
+BACKUP_2 = "google/gemini-2.5-flash"
 
 
 @pytest.fixture()

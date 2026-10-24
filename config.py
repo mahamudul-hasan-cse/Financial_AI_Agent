@@ -33,9 +33,9 @@ DEFAULT_SPACY_MODEL = "en_core_web_sm"
 DEFAULT_EMBEDDING_MODEL = "all-MiniLM-L6-v2"
 SUPPORTED_LLM_PROVIDERS = ("groq", "ollama")
 SUPPORTED_FALLBACK_PROVIDERS = ("openrouter", "none")
-# OpenRouter backup models (both support tool calling on the free tier).
-DEFAULT_OPENROUTER_MODEL = "nvidia/nemotron-3.5-super-vl:free"
-DEFAULT_OPENROUTER_FALLBACK_MODELS = "google/gemma-4-26b-a4b-it:free"
+# OpenRouter backup models (paid; tool calling tested).
+DEFAULT_OPENROUTER_MODEL = "openai/gpt-oss-120b"
+DEFAULT_OPENROUTER_FALLBACK_MODELS = "google/gemini-2.5-flash"
 
 
 def _env(name: str, default: str) -> str:

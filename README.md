@@ -121,7 +121,7 @@ bootstrap confidence intervals.
 | `[ERROR] message` | Generation failed; the message is user-facing (the stream still ends with `[DONE]`) |
 | `[FINAL]"text"` | The saved answer. Clients replace the streamed text with it |
 | `[RESEARCH_DATA]{json}` | Structured research card |
-| `[MODEL_INFO]{json}` | Who answered, e.g. `{"provider":"openrouter","model":"nvidia/nemotron-3.5-super-vl:free","fallback":true}` |
+| `[MODEL_INFO]{json}` | Who answered, e.g. `{"provider":"openrouter","model":"openai/gpt-oss-120b","fallback":true}` |
 | `[DONE]` | End of stream |
 
 **Backup provider.** When Groq answers 429 (rate limit) or 5xx, or can't be reached, the same
@@ -246,8 +246,8 @@ All settings are environment variables, read in `config.py`. `.env` is loaded wi
 | `LLM_RETRY_MAX_DELAY` | `20` | Longest wait (seconds) before a retry, even if Groq's `Retry-After` is longer |
 | `OPENROUTER_API_KEY` | (unset) | **Secret.** Turns on the automatic backup used when Groq is rate-limited or down |
 | `FALLBACK_PROVIDER` | `openrouter` if `OPENROUTER_API_KEY` is set, else `none` | Backup LLM provider. `none` disables it |
-| `OPENROUTER_MODEL` | `nvidia/nemotron-3.5-super-vl:free` | First backup model (tool calling tested) |
-| `OPENROUTER_FALLBACK_MODELS` | `google/gemma-4-26b-a4b-it:free` | Comma-separated models tried in order if the previous one errors or returns 429. Empty means none |
+| `OPENROUTER_MODEL` | `openai/gpt-oss-120b` | First backup model (tool calling tested) |
+| `OPENROUTER_FALLBACK_MODELS` | `google/gemini-2.5-flash` | Comma-separated models tried in order if the previous one errors or returns 429. Empty means none |
 | `AGENT_TOOL_CALL_LIMIT` | `3` | Max tool calls per answer; every tool round is another full model call |
 | `TOOL_OUTPUT_MAX_CHARS` | `2000` | Tool results are truncated to this many characters before the model sees them |
 | `CACHE_TTL_SECONDS` | `60` | Thread-safe TTL cache for yfinance data and tool results, per ticker + function. `0` disables it |
@@ -271,10 +271,7 @@ Frontend (build-time, `frontend/.env`): `VITE_API_URL` (default `/api`) and
 `VITE_OUTPUTS_URL` (default `/outputs`). Set both when the API runs on a different origin.
 Both are public: anything `VITE_*` ends up in the browser bundle, so never put secrets there.
 
-**OpenRouter free tier.** `:free` models allow about 20 requests a minute. They allow 50 requests a
-day without credits, or 1,000 a day once the account has bought at least $10 of credits. Free
-models can also be rate-limited upstream when they're busy, which is why there is a list of
-backup models. Every tool round of an answer is a separate request.
+**OpenRouter (paid backup).** Defaults are paid models with tested tool calling: `openai/gpt-oss-120b` (~$0.15/$0.60 per 1M input/output tokens) then `google/gemini-2.5-flash` (~$0.30/$2.50). A backup answer costs roughly $0.001–0.003. Paid models have no daily request cap (rate limits scale with credits). Every tool round of an answer is a separate request. Avoid `:free` models: they are capped (50–1000/day) and often rate-limited upstream.
 
 **Secrets.** Only `GROQ_API_KEY`, `OPENROUTER_API_KEY` and `API_KEY` are secret. Keep them in `.env` (git-ignored
 and excluded from the Docker build context) or in your platform's secret store, and pass
