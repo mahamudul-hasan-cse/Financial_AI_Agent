@@ -2,41 +2,30 @@ import { describe, it, expect } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import ResearchCard from '../ResearchCard'
 
-const mockData = {
-  title: 'Apple research brief',
-  summary: 'Apple remains resilient with mixed short-term sentiment.',
-  symbol: 'AAPL',
-  metrics: [
-    { label: 'Current Price', value: '$190.25', tone: 'neutral' },
-    { label: 'Today', value: '+1.20%', tone: 'positive' },
-  ],
-  news_signals: [
-    { title: 'Services growth', detail: 'Services revenue remains a support pillar.', tone: 'positive' },
-  ],
-  risks: [
-    { title: 'Valuation risk', detail: 'Premium multiples leave less room for disappointment.', tone: 'risk' },
-  ],
-  next_actions: ['Review the latest earnings transcript.'],
-  sources: [{ label: 'Yahoo Finance Quote', kind: 'market_data' }],
-  explainability: [{ label: 'Intent', value: 'stock_price' }],
-  summary_markdown: 'Detailed markdown body',
-}
-
 describe('ResearchCard', () => {
-  it('renders a readable assistant answer from structured data', () => {
-    render(<ResearchCard content={'Google is trading near $173 and remains supported by cloud and AI momentum.'} data={mockData} />)
+  it('renders the assistant answer as markdown', () => {
+    render(<ResearchCard content={'Google is trading near **$173**.\n\n- Cloud momentum'} />)
 
-    expect(screen.getByText('Quick Take:')).toBeInTheDocument()
-    expect(screen.getByText('Key Data:')).toBeInTheDocument()
-    expect(screen.getByText('Risks or Cautions:')).toBeInTheDocument()
-    expect(screen.getByText('Next Best Actions:')).toBeInTheDocument()
+    expect(screen.getByLabelText('Assistant response')).toBeInTheDocument()
+    expect(screen.getByText('$173').tagName).toBe('STRONG')
+    expect(screen.getByText('Cloud momentum').tagName).toBe('LI')
   })
 
-  it('falls back to a structured narrative when content is missing', () => {
-    render(<ResearchCard data={mockData} />)
+  it('renders nothing when there is no content and no charts', () => {
+    const { container } = render(<ResearchCard content="" data={{ artifacts: [] }} />)
+    expect(container.innerHTML).toBe('')
+  })
 
-    expect(screen.getByText('Quick Take:')).toBeInTheDocument()
-    expect(screen.getByText('Key Data:')).toBeInTheDocument()
-    expect(screen.getByText('Next Best Actions:')).toBeInTheDocument()
+  it('shows chart artifacts and strips standalone .png lines from the text', () => {
+    render(
+      <ResearchCard
+        content={'Here is the chart.\naapl_chart.png'}
+        data={{ artifacts: ['msft_chart.png', 'report.xlsx'] }}
+      />,
+    )
+
+    expect(screen.queryByText(/aapl_chart\.png/)).not.toBeInTheDocument()
+    const sources = screen.getAllByAltText('Generated chart').map(img => img.getAttribute('src'))
+    expect(sources).toEqual(['/outputs/charts/msft_chart.png', '/outputs/charts/aapl_chart.png'])
   })
 })

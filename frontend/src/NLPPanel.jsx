@@ -58,6 +58,7 @@ function NLPPanel({ meta }) {
         className="nlp-panel-toggle"
         onClick={() => setExpanded(e => !e)}
         aria-expanded={expanded}
+        aria-label={expanded ? 'Collapse NLP analysis' : 'Expand NLP analysis'}
         type="button"
       >
         <span className="nlp-panel-icon">🧠</span>

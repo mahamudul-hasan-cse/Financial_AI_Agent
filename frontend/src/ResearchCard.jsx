@@ -2,14 +2,11 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
 const PNG_LINE_RE = /^[a-zA-Z0-9_.-]+\.png\s*$/
+// Base URL for generated files; override when the API is on another origin.
+const OUTPUTS_BASE = import.meta.env.VITE_OUTPUTS_URL || '/outputs'
 
 function ResearchCard({ content, data }) {
   const raw = (content || '').trim()
-
-  if (import.meta.env.DEV) {
-    console.log('[ResearchCard] raw content:', JSON.stringify(raw.slice(0, 300)))
-    console.log('[ResearchCard] artifacts:', data?.artifacts)
-  }
 
   // Split lines, collect any standalone .png filename lines, strip them from display text
   const lines = raw.split('\n')
@@ -46,7 +43,7 @@ function ResearchCard({ content, data }) {
           {chartImages.map(filename => (
             <img
               key={filename}
-              src={`/outputs/charts/${filename}`}
+              src={`${OUTPUTS_BASE}/charts/${encodeURIComponent(filename)}`}
               alt="Generated chart"
               className="chart-img"
               onError={e => { e.currentTarget.style.display = 'none' }}

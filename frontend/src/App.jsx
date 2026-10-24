@@ -4,9 +4,8 @@ import ResearchCard from './ResearchCard.jsx'
 import NLPPanel from './NLPPanel.jsx'
 import StockChart from './StockChart.jsx'
 import { useToast } from './useToast.jsx'
+import { apiFetch, createSSEParser, generateSessionId, interpretEvent } from './api.js'
 import './App.css'
-
-const API_BASE = import.meta.env.VITE_API_URL || '/api'
 
 const LOADING_STAGES = [
   'Analyzing your question…',
@@ -26,10 +25,6 @@ const STARTER_PROMPTS = [
 
 function formatTime(ts) {
   return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-}
-
-function generateSessionId() {
-  return `sess_${crypto.randomUUID?.() ?? Math.random().toString(36).slice(2)}`
 }
 
 function getSpeechRecognitionConstructor() {
@@ -64,7 +59,6 @@ export default function App() {
   }
 
   const bottomRef        = useRef(null)
-  const streamBufferRef  = useRef('')
   const stageTimerRef    = useRef(null)
   const abortRef         = useRef(null)
   const recognitionRef   = useRef(null)
@@ -84,7 +78,7 @@ export default function App() {
 
   async function loadSavedSessions(activeId = null) {
     try {
-      const res = await fetch(`${API_BASE}/sessions`)
+      const res = await apiFetch('/sessions')
       if (!res.ok) return
       const data = await res.json()
       setSavedSessions(data.sessions || [])
@@ -107,7 +101,7 @@ export default function App() {
   }
 
   function handleNewChat() {
-    abortRef.current?.abort()
+    abortRef.current?.abort('switch')
     resetStageTimer()
     recognitionRef.current?.stop?.()
     window.speechSynthesis?.cancel()
@@ -118,7 +112,8 @@ export default function App() {
   async function handleDeleteSession(targetId, e) {
     e.stopPropagation()
     try {
-      await fetch(`${API_BASE}/chat/${targetId}`, { method: 'DELETE' })
+      const res = await apiFetch(`/chat/${encodeURIComponent(targetId)}`, { method: 'DELETE' })
+      if (!res.ok) throw new Error('delete failed')
       setSavedSessions(prev => prev.filter(s => s.session_id !== targetId))
       if (targetId === sessionId) handleNewChat()
       addToast('Chat deleted', 'success')
@@ -126,9 +121,10 @@ export default function App() {
   }
 
   async function handleLoadSession(targetId) {
+    abortRef.current?.abort('switch')
     setHistoryLoading(true)
     try {
-      const res  = await fetch(`${API_BASE}/sessions/${targetId}`)
+      const res  = await apiFetch(`/sessions/${encodeURIComponent(targetId)}`)
       const data = await res.json()
       if (!res.ok) throw new Error(data.detail || 'Could not load chat history')
       setSessionId(data.session_id)
@@ -186,106 +182,91 @@ export default function App() {
 
     const controller = new AbortController()
     abortRef.current = controller
-    let finalStructured = null
-    let finalNlpMeta    = null
+
+    // One request per question: no automatic fallback to /api/chat, which
+    // would run the LLM a second time (the server already retries a failed
+    // generation once if nothing was streamed yet).
+    const state = { text: '', final: null, error: null, nlpMeta: null, structured: null }
+    const render = (fallbackText = '') => {
+      // The user switched/cleared the conversation: don't write into it.
+      if (controller.signal.reason === 'switch') return
+      setMessages(prev => {
+        if (prev.length === 0) return prev
+        const updated = [...prev]
+        updated[updated.length - 1] = {
+          role: 'agent',
+          content: state.final ?? (state.text || fallbackText),
+          timestamp: agentTs,
+          nlpMeta: state.nlpMeta,
+          structuredResponse: state.structured,
+        }
+        return updated
+      })
+    }
 
     try {
-      const res = await fetch(`${API_BASE}/chat/stream`, {
+      const res = await apiFetch('/chat/stream', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: text, session_id: sessionId }),
         signal: controller.signal,
       })
       if (!res.ok) {
         const payload = await res.json().catch(() => ({}))
-        throw new Error(payload.detail || 'Request failed')
+        const retryAfter = res.headers.get('Retry-After')
+        const detail = payload.detail || `Request failed (${res.status})`
+        throw new Error(res.status === 429 && retryAfter ? `${detail} Try again in ${retryAfter}s.` : detail)
       }
 
       const reader  = res.body.getReader()
       const decoder = new TextDecoder()
-      streamBufferRef.current = ''
+      const parse   = createSSEParser()
+      let finished  = false
 
-      while (true) {
+      while (!finished) {
         const { done, value } = await reader.read()
+        const events = parse(done ? decoder.decode() : decoder.decode(value, { stream: true }), done)
+        for (const data of events) {
+          const event = interpretEvent(data)
+          if (event.type === 'done') { finished = true; break }
+          if (event.type === 'nlp') state.nlpMeta = event.value
+          else if (event.type === 'research') state.structured = event.value
+          else if (event.type === 'final') state.final = event.value
+          else if (event.type === 'error') state.error = event.value || 'Generation failed.'
+          else if (event.type === 'text') state.text += event.value
+          else continue
+          render()
+        }
         if (done) break
-        const chunk = decoder.decode(value, { stream: true })
-
-        for (const line of chunk.split('\n')) {
-          if (!line.startsWith('data: ')) continue
-          const data = line.slice(6)
-          if (data === '[DONE]') break
-          if (data.startsWith('[NLP_META]')) {
-            try { finalNlpMeta = JSON.parse(data.slice(10)) } catch { /* noop */ }
-            continue
-          }
-          if (data.startsWith('[RESEARCH_DATA]')) {
-            try { finalStructured = JSON.parse(data.slice(15)) } catch { /* noop */ }
-            continue
-          }
-          if (data.startsWith('[ERROR]')) {
-            streamBufferRef.current += `\n\n${data}`; continue
-          }
-          try       { streamBufferRef.current += JSON.parse(data) }
-          catch     { streamBufferRef.current += data }
-
-          setMessages(prev => {
-            const updated = [...prev]
-            updated[updated.length - 1] = {
-              role: 'agent', content: streamBufferRef.current,
-              timestamp: agentTs, nlpMeta: finalNlpMeta,
-              structuredResponse: finalStructured,
-            }
-            return updated
-          })
-        }
       }
+      if (finished) reader.cancel().catch(() => {})
 
-      setMessages(prev => {
-        const updated = [...prev]
-        updated[updated.length - 1] = {
-          role: 'agent',
-          content: streamBufferRef.current || 'No response received. Please try again.',
-          timestamp: agentTs, nlpMeta: finalNlpMeta,
-          structuredResponse: finalStructured,
-        }
-        return updated
-      })
+      if (state.error && !state.text) {
+        state.final = `Error: ${state.error}`
+        addToast(state.error, 'error')
+      } else if (state.error) {
+        addToast('The response was interrupted. Please try again.', 'error')
+      }
+      render('No response received. Please try again.')
       loadSavedSessions(sessionId)
     } catch (err) {
-      if (err.name === 'AbortError') return
-      try {
-        const res  = await fetch(`${API_BASE}/chat`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: text, session_id: sessionId }),
-        })
-        const data = await res.json()
-        if (!res.ok) throw new Error(data.detail || 'Could not reach the server')
-        if (data.session_id) setSessionId(data.session_id)
-        setMessages(prev => {
-          const updated = [...prev]
-          updated[updated.length - 1] = {
-            role: 'agent', content: data.response,
-            timestamp: agentTs, structuredResponse: data.structured_response,
-          }
-          return updated
-        })
-        loadSavedSessions(data.session_id || sessionId)
-        addToast('Recovered with fallback mode', 'info')
-      } catch (fallbackErr) {
-        setMessages(prev => {
-          const updated = [...prev]
-          updated[updated.length - 1] = {
-            role: 'agent',
-            content: `Error: ${fallbackErr.message || 'Server unavailable.'}`,
-            timestamp: agentTs,
-          }
-          return updated
-        })
-        addToast(fallbackErr.message || 'Server unavailable', 'error')
+      if (controller.signal.aborted) {
+        render('Stopped.')
+        return
       }
+      state.final = state.text
+        ? `${state.text}\n\n_Connection lost: ${err.message || 'server unavailable'}._`
+        : `Error: ${err.message || 'Server unavailable.'}`
+      render()
+      addToast(err.message || 'Server unavailable', 'error')
     } finally {
-      resetStageTimer(); setLoading(false); abortRef.current = null
+      if (abortRef.current === controller) {
+        resetStageTimer(); setLoading(false); abortRef.current = null
+      }
     }
+  }
+
+  function handleStop() {
+    abortRef.current?.abort()
   }
 
   const canSend   = input.trim().length > 0 && !loading
@@ -474,15 +455,28 @@ export default function App() {
                   >
                     🎙
                   </button>
-                  <button
-                    className="send-btn"
-                    disabled={!canSend}
-                    onClick={() => sendMessage()}
-                    type="button"
-                    title="Send"
-                  >
-                    ➤
-                  </button>
+                  {loading ? (
+                    <button
+                      className="send-btn"
+                      onClick={handleStop}
+                      type="button"
+                      title="Stop generating"
+                      aria-label="Stop generating"
+                    >
+                      ■
+                    </button>
+                  ) : (
+                    <button
+                      className="send-btn"
+                      disabled={!canSend}
+                      onClick={() => sendMessage()}
+                      type="button"
+                      title="Send"
+                      aria-label="Send"
+                    >
+                      ➤
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
