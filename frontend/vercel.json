@@ -4,8 +4,8 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "rewrites": [
-    { "source": "/api/:path*", "destination": "https://BACKEND_URL_PLACEHOLDER/api/:path*" },
-    { "source": "/outputs/:path*", "destination": "https://BACKEND_URL_PLACEHOLDER/outputs/:path*" },
+    { "source": "/api/:path*", "destination": "https://ca-finagent.yellowstone-f22fd56b.centralindia.azurecontainerapps.io/api/:path*" },
+    { "source": "/outputs/:path*", "destination": "https://ca-finagent.yellowstone-f22fd56b.centralindia.azurecontainerapps.io/outputs/:path*" },
     { "source": "/((?!api/|outputs/|assets/).*)", "destination": "/index.html" }
   ]
 }
